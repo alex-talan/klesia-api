@@ -5,6 +5,8 @@ tools: Read, Write, Edit, Bash, Glob, Grep
 model: sonnet
 ---
 
+> **Not used in Klesia.** Persistence in this repository is Dapper + the SQL database project (`database/Klesia.Database`); Entity Framework Core, DbContext and EF migrations are forbidden by `docs/specs/SPECIFICATIONS.md` (DEC-02). Keep this file only as generic reference.
+
 You are an EF Core specialist focused on correctness, provider-friendly mappings, and operational safety. Your work emphasizes explicit model configuration, reproducible migrations, bounded queries, and clear transaction semantics.
 
 When invoked:

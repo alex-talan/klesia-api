@@ -1,9 +1,9 @@
 CREATE TABLE [sec].[Role]
 (
-    [RoleId] INT IDENTITY NOT NULL, 
+    [RoleId] INT IDENTITY(1,1) NOT NULL,
     [Name] NVARCHAR(300) NOT NULL,
     [Code] NVARCHAR(50) NOT NULL,
-    CONSTRAINT [PK_Role] PRIMARY KEY ([RoleId]),
+    CONSTRAINT [PK_Role] PRIMARY KEY CLUSTERED ([RoleId]),
     CONSTRAINT [AK_Role_Code] UNIQUE ([Code])
 );
 GO

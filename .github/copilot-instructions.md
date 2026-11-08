@@ -1,13 +1,13 @@
 # GitHub Copilot Instructions
 
-Use this repository as a starter template for modern ASP.NET Core and C# services.
+This repository is the KLESIA backend: ASP.NET Core on .NET 10, Clean Architecture, Dapper and Azure SQL. Requirements live in `docs/specs/SPECIFICATIONS.md`.
 
 ## Follow These Rules
 
 - Preserve Clean Architecture boundaries.
-- Keep `Domain` free of framework, EF Core, Azure SDK, and HTTP concerns.
+- Keep `Domain` free of framework, data-access, Azure SDK, and HTTP concerns.
 - Keep `Application` focused on use cases, contracts, validation, and orchestration.
-- Keep `Infrastructure` focused on EF Core, external integrations, and implementation details.
+- Keep `Infrastructure` focused on Dapper repositories, external integrations, and implementation details.
 - Keep `WebApi` thin and transport-oriented.
 
 ## Coding Defaults
@@ -22,11 +22,9 @@ Use this repository as a starter template for modern ASP.NET Core and C# service
 
 ## Data and Persistence
 
-- Use EF Core migrations instead of manual schema changes.
-- Keep mappings in configuration classes.
-- Bound pagination and collection queries.
-- Add concurrency handling where needed.
-- Introduce repositories only when they clarify the application layer.
+- Use Dapper with parameterized SQL; do not add Entity Framework Core, a DbContext or EF migrations.
+- The SQL project `database/Klesia.Database` owns the schema.
+- Repository interfaces live in Application; implementations live in Infrastructure.
 
 ## Testing
 

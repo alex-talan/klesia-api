@@ -14,13 +14,12 @@ This file is the Claude Code-specific instruction entrypoint. Cross-tool equival
 ## 2. Clean Architecture Is Mandatory
 - Domain must not depend on Application, Infrastructure, or WebApi.
 - Application contains use cases, DTOs, interfaces, validation, and orchestration.
-- Infrastructure contains EF Core, repositories, Azure clients, and external integrations.
+- Infrastructure contains Dapper repositories, Azure clients, and external integrations.
 - WebApi is the transport layer and composition root only.
 - Do not move business rules into controllers, EF configurations, or Azure adapters.
 
 ## 3. .NET Engineering Rules
-- Treat `net10.0` as the template's intended primary target and move the solution there when the SDK is available.
-- Keep `net9.0` compatibility where practical.
+- The solution targets `net10.0`.
 - Use constructor injection.
 - Keep nullable reference types enabled.
 - Use async/await correctly and pass cancellation tokens through I/O paths.
@@ -28,13 +27,12 @@ This file is the Claude Code-specific instruction entrypoint. Cross-tool equival
 - Use strongly typed configuration bound from `appsettings`, environment variables, and cloud configuration sources.
 - Keep generated code minimal and purposeful.
 
-## 4. EF Core Rules
-- Use EF Core migrations instead of manual schema changes.
-- Keep `DbContext` and entity configurations in Infrastructure.
-- Prefer explicit `IEntityTypeConfiguration<T>` mappings.
-- Add concurrency control for important aggregates.
-- Bound pagination and query size.
-- Introduce a repository only when it improves the application layer.
+## 4. Data Access Rules (Dapper, no EF)
+- Persistence uses Dapper with Microsoft.Data.SqlClient. Do NOT add Entity Framework Core, a DbContext or EF migrations.
+- The SQL database project (`database/Klesia.Database`) is the only owner of the schema; change tables there.
+- Write parameterized SQL inside Infrastructure repositories; never concatenate user input into SQL.
+- Repository interfaces live in Application; implementations live in Infrastructure.
+- Sprint 1 returns the full demand list without pagination (see docs/specs/SPECIFICATIONS.md).
 
 ## 5. API Rules
 - Keep controllers thin.
@@ -54,11 +52,12 @@ This file is the Claude Code-specific instruction entrypoint. Cross-tool equival
 - Use xUnit, FluentAssertions, and NSubstitute consistently.
 - Add tests for positive and negative scenarios.
 - Keep unit tests focused on business behavior.
-- Use integration tests for HTTP endpoints, EF Core mappings, migrations, and persistence behavior.
-- Prefer SQLite or Testcontainers where the provider behavior matters.
+- Use integration tests for the HTTP pipeline (signed test tokens, in-memory repositories).
+- SQL constraint tests need a real Azure SQL / SQL Server database: set `KLESIA_TEST_SQL_CONNECTION` to run them.
 
 ## 8. Verification Before Finish
 - Run build and relevant tests before declaring work complete.
 - Review warnings, analyzer output, and architectural drift.
 - Confirm project references still point inward only.
-- Leave README and template guidance in sync with the code.
+- Leave README and docs/specs/SPECIFICATIONS.md in sync with the code.
+- The authoritative requirements are in `docs/specs/SPECIFICATIONS.md`; change contracts there first.

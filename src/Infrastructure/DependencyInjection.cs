@@ -1,10 +1,9 @@
 using Application.Abstractions;
-using Application.WorkItems;
-using Infrastructure.Clock;
+using Application.Demands;
+using Infrastructure.Documents;
 using Infrastructure.Options;
 using Infrastructure.Persistence;
 using Infrastructure.Persistence.Repositories;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -16,26 +15,19 @@ public static class DependencyInjection
     {
         services.AddOptions<SqlServerOptions>()
             .Bind(configuration.GetSection(SqlServerOptions.SectionName))
-            .Validate(options => !string.IsNullOrWhiteSpace(options.AppDb), "ConnectionStrings:AppDb is required.")
+            .Validate(
+                options => !string.IsNullOrWhiteSpace(options.KlesiaDb) && !options.KlesiaDb.Contains('<', StringComparison.Ordinal),
+                "ConnectionStrings:KlesiaDb is required and must not contain a '<placeholder>'. See docs/local-development.md.")
             .ValidateOnStart();
 
         services.AddOptions<AzureOptions>()
             .Bind(configuration.GetSection(AzureOptions.SectionName));
 
-        string connectionString = configuration.GetConnectionString("AppDb")
-            ?? throw new InvalidOperationException("Connection string 'AppDb' is required.");
-
-        services.AddDbContext<AppDbContext>(options =>
-        {
-            options.UseSqlServer(
-                connectionString,
-                sqlServer => sqlServer.EnableRetryOnFailure());
-        });
-
-        services.AddScoped<IUnitOfWork>(serviceProvider => serviceProvider.GetRequiredService<AppDbContext>());
-        services.AddScoped<IWorkItemRepository, WorkItemRepository>();
-        services.AddSingleton<IClock, SystemClock>();
-        services.AddScoped<WorkItemService>();
+        services.AddSingleton<ISqlConnectionFactory, SqlConnectionFactory>();
+        services.AddScoped<IUserRepository, UserRepository>();
+        services.AddScoped<IDemandRepository, DemandRepository>();
+        services.AddSingleton<IBaeLinkResolver, HttpsBaeLinkResolver>();
+        services.AddScoped<DemandService>();
 
         return services;
     }

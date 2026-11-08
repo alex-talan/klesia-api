@@ -3,6 +3,8 @@ name: ef-core-patterns
 description: Use EF Core safely with explicit configurations, migrations, concurrency control, bounded queries, and clear transaction behavior. Use when designing persistence models, repositories, DbContext usage, or migration workflows.
 ---
 
+> **Not used in Klesia.** Persistence in this repository is Dapper + the SQL database project (`database/Klesia.Database`); Entity Framework Core, DbContext and EF migrations are forbidden by `docs/specs/SPECIFICATIONS.md` (DEC-02). Keep this file only as generic reference.
+
 # EF Core Patterns Skill
 
 Use EF Core in a way that is explicit, testable, and operationally safe.

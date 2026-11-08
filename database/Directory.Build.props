@@ -1,0 +1,7 @@
+<Project>
+  <!--
+    Intentionally empty: stops MSBuild from inheriting the repository-root Directory.Build.props
+    (net10.0, nullable, analyzers, central package management), which targets the .NET projects
+    and must not apply to the SDK-style SQL project (Microsoft.Build.Sql).
+  -->
+</Project>

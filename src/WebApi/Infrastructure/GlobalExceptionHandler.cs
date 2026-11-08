@@ -4,33 +4,42 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace WebApi.Infrastructure;
 
+/// <summary>
+/// Maps exceptions to safe ProblemDetails responses. Bodies never contain stack traces, SQL, tokens or
+/// connection strings; the 403 body is identical for unknown and disabled accounts.
+/// </summary>
 public sealed class GlobalExceptionHandler(
     ILogger<GlobalExceptionHandler> logger,
     IProblemDetailsService problemDetailsService) : IExceptionHandler
 {
     public async ValueTask<bool> TryHandleAsync(HttpContext httpContext, Exception exception, CancellationToken cancellationToken)
     {
-        int statusCode = exception switch
+        (int statusCode, string title) = exception switch
         {
-            NotFoundException => StatusCodes.Status404NotFound,
-            ArgumentException or ArgumentOutOfRangeException => StatusCodes.Status400BadRequest,
-            _ => StatusCodes.Status500InternalServerError
+            ForbiddenException => (StatusCodes.Status403Forbidden, "Access denied."),
+            NotFoundException => (StatusCodes.Status404NotFound, "The requested resource was not found."),
+            ArgumentException => (StatusCodes.Status400BadRequest, "The request is invalid."),
+            _ => (StatusCodes.Status500InternalServerError, "An unexpected error occurred.")
         };
 
-        logger.LogError(exception, "Unhandled exception mapped to {StatusCode}", statusCode);
+        if (statusCode >= StatusCodes.Status500InternalServerError)
+        {
+            logger.LogError(exception, "Unhandled exception mapped to {StatusCode}", statusCode);
+        }
+        else
+        {
+            logger.LogWarning("Request rejected with {StatusCode}", statusCode);
+        }
+
         httpContext.Response.StatusCode = statusCode;
 
         return await problemDetailsService.TryWriteAsync(new ProblemDetailsContext
         {
             HttpContext = httpContext,
-            Exception = exception,
             ProblemDetails = new ProblemDetails
             {
                 Status = statusCode,
-                Title = statusCode >= 500 ? "An unexpected error occurred." : exception.Message,
-                Detail = httpContext.RequestServices.GetRequiredService<IHostEnvironment>().IsDevelopment()
-                    ? exception.ToString()
-                    : null
+                Title = title
             }
         });
     }

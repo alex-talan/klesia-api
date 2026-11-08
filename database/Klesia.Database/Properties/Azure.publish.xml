@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Publish profile for Azure SQL Database. Contains NO credentials and NO server name:
+  pass the target as a connection string at publish time, for example
+    SqlPackage /Action:Publish /SourceFile:... /Profile:... /TargetConnectionString:$env:KLESIA_SQL_DEPLOY_CONNECTION
+-->
+<Project ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <TargetPlatform>SqlAzureV12</TargetPlatform>
+    <CreateNewDatabase>False</CreateNewDatabase>
+    <BlockOnPossibleDataLoss>True</BlockOnPossibleDataLoss>
+    <DropObjectsNotInSource>False</DropObjectsNotInSource>
+    <GenerateSmartDefaults>False</GenerateSmartDefaults>
+    <IncludeCompositeObjects>True</IncludeCompositeObjects>
+    <AllowIncompatiblePlatform>False</AllowIncompatiblePlatform>
+    <IgnoreUserSettingsObjects>True</IgnoreUserSettingsObjects>
+    <IgnorePermissions>True</IgnorePermissions>
+    <IgnoreRoleMembership>True</IgnoreRoleMembership>
+  </PropertyGroup>
+</Project>

@@ -8,7 +8,7 @@ Use this repository as a starter kit for building maintainable enterprise .NET s
 
 - ASP.NET Core Web API
 - Clean Architecture
-- EF Core with migrations
+- Dapper for data access (no Entity Framework) and a SQL database project for the schema
 - Strong typing and nullable reference types
 - Structured logging and health checks
 - Azure-ready integration boundaries
@@ -18,14 +18,13 @@ Use this repository as a starter kit for building maintainable enterprise .NET s
 
 - `src/Domain` must not depend on `Application`, `Infrastructure`, or `WebApi`.
 - `src/Application` owns use cases, DTOs, interfaces, validation, and orchestration.
-- `src/Infrastructure` owns EF Core, repositories, Azure SDK clients, and implementation details.
+- `src/Infrastructure` owns Dapper repositories, Azure SDK clients, and implementation details.
 - `src/WebApi` is the transport layer and composition root only.
 - Keep business logic out of controllers, middleware, EF mappings, and cloud adapters.
 
 ## Engineering Rules
 
-- Treat `net10.0` as the intended primary target when the SDK is available.
-- Keep `net9.0` compatibility where practical.
+- The solution targets `net10.0`.
 - Prefer constructor injection.
 - Keep nullable reference types enabled.
 - Use async/await correctly and pass cancellation tokens through I/O paths.
@@ -41,14 +40,13 @@ Use this repository as a starter kit for building maintainable enterprise .NET s
 - Use `ProblemDetails` or `ValidationProblemDetails` for failures.
 - Include health checks, OpenAPI, and structured logging.
 
-## EF Core Rules
+## Data Access Rules (Dapper, no EF)
 
-- Use EF Core migrations for schema changes.
-- Keep `DbContext` and entity configurations in Infrastructure.
-- Prefer explicit `IEntityTypeConfiguration<T>` mappings.
-- Add concurrency control for aggregates where concurrent edits matter.
-- Bound queries and pagination.
-- Add repositories only when they improve the application layer.
+- Do not add Entity Framework Core, a DbContext or EF migrations.
+- Schema changes go in the SQL database project `database/Klesia.Database`.
+- Write parameterized SQL in Infrastructure repositories.
+- Repository interfaces live in Application, implementations in Infrastructure.
+- Sprint 1 returns the full demand list without pagination (see `docs/specs/SPECIFICATIONS.md`).
 
 ## Azure Rules
 
@@ -63,8 +61,7 @@ Use this repository as a starter kit for building maintainable enterprise .NET s
 - Use xUnit, FluentAssertions, and NSubstitute consistently.
 - Add tests for both happy paths and failure paths.
 - Keep unit tests focused on business behavior.
-- Use integration tests for HTTP endpoints, persistence behavior, and migrations.
-- Prefer SQLite or Testcontainers when provider behavior matters.
+- Use integration tests for HTTP endpoints; SQL constraint tests run against a real database when `KLESIA_TEST_SQL_CONNECTION` is set.
 
 ## Verification Before Finish
 

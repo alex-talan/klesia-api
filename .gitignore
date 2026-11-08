@@ -10,3 +10,8 @@ artifacts/
 *.db
 *.db-shm
 *.db-wal
+
+# Personal local configuration (tenant/client ids, connection strings): never commit
+appsettings.Local.json
+**/appsettings.Local.json
+.claude/settings.local.json
