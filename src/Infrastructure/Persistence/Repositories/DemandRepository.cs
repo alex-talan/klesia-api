@@ -10,7 +10,7 @@ public sealed class DemandRepository(ISqlConnectionFactory connectionFactory) : 
     private const string ListByUserIdSql = """
         SELECT d.[DemandId], d.[SirenNumber], d.[BaeLink], s.[Code] AS [StatusCode]
         FROM [dbo].[Demand] AS d
-        INNER JOIN [dbo].[Status] AS s ON s.[StatusId] = d.[StatusId]
+        INNER JOIN [ref].[Status] AS s ON s.[StatusId] = d.[StatusId]
         WHERE d.[UserId] = @UserId
         ORDER BY d.[DemandId] DESC;
         """;

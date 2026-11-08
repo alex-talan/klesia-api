@@ -20,7 +20,7 @@ WHEN NOT MATCHED BY TARGET THEN
 GO
 
 -- Demand statuses (codes are part of the API contract: pending | ok | fail)
-MERGE [dbo].[Status] AS target
+MERGE [ref].[Status] AS target
 USING (VALUES
     (N'Done',    N'Traitée',     N'ok',      N'Demand done'),
     (N'Pending', N'En cours',    N'pending', N'Demand still in process'),

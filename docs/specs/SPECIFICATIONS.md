@@ -91,7 +91,7 @@ flowchart LR
 | ID | Requirement |
 |---|---|
 | DB-01 | Use separate files for SQL schemas and every table definition. |
-| DB-02 | Exactly four domain tables: `sec.Role`, `sec.User`, `dbo.Status`, `dbo.Demand`. The schema `ref` is created (file `Schemas/ref.sql`) and is reserved for future reference/lookup objects; it contains **no table** in Sprint 1. |
+| DB-02 | Exactly four domain tables: `sec.Role`, `sec.User`, `ref.Status`, `dbo.Demand`. Schema usage: `sec` for security tables, `ref` for reference/lookup tables (the status lookup), `dbo` for business data. |
 | DB-03 | Every table has a primary key named after its table: `{Table}Id INT IDENTITY(1,1)` — `RoleId`, `UserId`, `StatusId`, `DemandId`. |
 | DB-04 | All schema, table and column identifiers use PascalCase, except the schema identifiers `sec`, `dbo` and `ref`. |
 | DB-05 | Declare every foreign key explicitly and create an index with the foreign-key column as leading key. Do not create an index that duplicates the primary key or a unique constraint. |
@@ -183,7 +183,7 @@ The `UserUniqueId` uniqueness is based on the **ASSUMPTION** of a single configu
 
 `Email` is **not** unique by default: email can change and is not the authoritative identity key.
 
-#### `dbo.Status`
+#### `ref.Status`
 
 | Column | SQL type | Null | Rules |
 |---|---|---|---|
@@ -203,7 +203,7 @@ Status `Code` is the source of the API `status` property; do not return the `Nam
 | `UserId` | `INT` | No | `FK_Demand_User` → `sec.User(UserId)`; indexed by `IX_Demand_UserId` |
 | `SirenNumber` | `CHAR(9)` | No | Exactly nine ASCII digits, no punctuation (`CK_Demand_SirenNumber`) |
 | `BaeLink` | `NVARCHAR(2048)` | No | Absolute HTTPS URL of the PDF in SharePoint; checked at least for the HTTPS prefix (`CK_Demand_BaeLink`) |
-| `StatusId` | `INT` | No | `FK_Demand_Status` → `dbo.Status(StatusId)`; indexed by `IX_Demand_StatusId` |
+| `StatusId` | `INT` | No | `FK_Demand_Status` → `ref.Status(StatusId)`; indexed by `IX_Demand_StatusId` |
 
 **SIREN is a string.** It is stored as text (`CHAR(9)`), carried as a string in the domain (`SirenNumber`), in the DTOs and in JSON — never as a number — so that leading zeros are preserved and display formatting stays separate from identity. The database check enforces **exactly nine digits** with a literal digit pattern (a `NOT LIKE '%[^0-9]%'` check alone would accept a shorter value padded with spaces). A SIREN checksum rule is **not** required in this sprint.
 
@@ -264,10 +264,10 @@ GO
 
 The index `IX_User` that existed on `UserId` (the primary key) was removed as redundant and replaced by `IX_User_RoleId`, which supports the `FK_User_Role` foreign key (DB-05).
 
-**`Tables/dbo/Status.sql`**
+**`Tables/ref/Status.sql`**
 
 ```sql
-CREATE TABLE [dbo].[Status]
+CREATE TABLE [ref].[Status]
 (
     [StatusId] INT IDENTITY(1,1) NOT NULL,
     [Name] NVARCHAR(100) NOT NULL,
@@ -294,7 +294,7 @@ CREATE TABLE [dbo].[Demand]
     [StatusId] INT NOT NULL,
     CONSTRAINT [PK_Demand] PRIMARY KEY CLUSTERED ([DemandId]),
     CONSTRAINT [FK_Demand_User] FOREIGN KEY ([UserId]) REFERENCES [sec].[User] ([UserId]),
-    CONSTRAINT [FK_Demand_Status] FOREIGN KEY ([StatusId]) REFERENCES [dbo].[Status] ([StatusId]),
+    CONSTRAINT [FK_Demand_Status] FOREIGN KEY ([StatusId]) REFERENCES [ref].[Status] ([StatusId]),
     CONSTRAINT [CK_Demand_SirenNumber] CHECK
         ([SirenNumber] COLLATE Latin1_General_100_BIN2 LIKE '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'),
     CONSTRAINT [CK_Demand_BaeLink] CHECK ([BaeLink] LIKE N'https://%')
@@ -329,8 +329,9 @@ database/
     │   ├── sec/
     │   │   ├── Role.sql
     │   │   └── User.sql
+    │   ├── ref/
+    │   │   └── Status.sql
     │   └── dbo/
-    │       ├── Status.sql
     │       └── Demand.sql
     ├── Scripts/
     │   ├── 01_RefData.sql
@@ -521,7 +522,7 @@ Accept: application/json
 | `demands[].demand_id` | integer | `dbo.Demand.DemandId`. |
 | `demands[].siren_number` | string | `dbo.Demand.SirenNumber`, presented as `XXX-XXX-XXX`. The backend performs formatting. |
 | `demands[].bae_link` | string | `dbo.Demand.BaeLink`: the **HTTPS URL** of the corresponding PDF in SharePoint, validated by the backend. It opens in the browser with the user's own SharePoint/Entra session, without a frontend-provided bearer Authorization header. |
-| `demands[].status` | string enum | `dbo.Status.Code`, exclusively `pending`, `ok`, `fail`. |
+| `demands[].status` | string enum | `ref.Status.Code`, exclusively `pending`, `ok`, `fail`. |
 
 **Empty list is valid** and still returns `200`:
 
@@ -537,7 +538,7 @@ Accept: application/json
 
 1. Authenticate bearer token and require the configured delegated scope.
 2. Resolve an active `sec.User` using validated `oid`; otherwise return `403`.
-3. Read demands only where `dbo.Demand.UserId = sec.User.UserId`; join `dbo.Status` by `StatusId`.
+3. Read demands only where `dbo.Demand.UserId = sec.User.UserId`; join `ref.Status` by `StatusId`.
 4. Map the response to exactly the specified snake_case field names and types; no database rows or domain objects serialized directly.
 5. Convert stored 9-digit SIREN to three groups separated by hyphens.
 6. Return the stored status code verbatim (from the three allowed lowercase codes).

@@ -78,7 +78,7 @@ public sealed class SqlConstraintTests : IAsyncLifetime
     public async Task UnsupportedStatusCode_IsRejected()
     {
         SqlException error = await Assert.ThrowsAsync<SqlException>(() => ExecuteAsync(
-            "INSERT [dbo].[Status] ([Name], [DisplayName], [Code]) VALUES (N'x', N'x', N'unknown');"));
+            "INSERT [ref].[Status] ([Name], [DisplayName], [Code]) VALUES (N'x', N'x', N'unknown');"));
 
         error.Number.Should().Be(ConstraintViolation);
     }
@@ -161,7 +161,7 @@ public sealed class SqlConstraintTests : IAsyncLifetime
             new SqlParameter("@StatusId", statusId));
 
     private Task<int> PendingStatusIdAsync() =>
-        ScalarAsync<int>("SELECT [StatusId] FROM [dbo].[Status] WHERE [Code] = N'pending';");
+        ScalarAsync<int>("SELECT [StatusId] FROM [ref].[Status] WHERE [Code] = N'pending';");
 
     private async Task ExecuteAsync(string sql, params SqlParameter[] parameters)
     {

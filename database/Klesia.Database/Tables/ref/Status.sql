@@ -1,4 +1,4 @@
-CREATE TABLE [dbo].[Status]
+CREATE TABLE [ref].[Status]
 (
     [StatusId] INT IDENTITY(1,1) NOT NULL,
     [Name] NVARCHAR(100) NOT NULL,
