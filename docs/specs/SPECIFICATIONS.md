@@ -1,13 +1,13 @@
 # KLESIA — Backend Functional & Technical Specification
 
 **Document ID:** KLESIA-BE-SPEC  
-**Version:** 1.1 (Sprint 1 baseline, revised)  
-**Date:** 2026-11-08  
+**Version:** 1.2 (Sprint 1 baseline, revised; HTTP contract adopted for all three endpoints)  
+**Date:** 2026-11-09  
 **Status:** Implementation-ready for Sprint 1; future contracts recorded separately  
 **Language:** English  
 **Primary audience:** Backend engineers, database engineers, AI coding agents, QA and infrastructure engineers
 
-> **Purpose.** This document specifies the incremental implementation of the KLESIA backend. Sprint 1 delivers an authenticated, authorized read-only demand-list API and the relational database supporting that view. The future SignalR and document-related contracts are retained here for compatibility **but are not Sprint 1 implementation work**. Later sprints should extend this document rather than silently changing existing contracts.
+> **Purpose.** This document specifies the incremental implementation of the KLESIA backend. Sprint 1 delivers an authenticated, authorized read-only demand-list API and the relational database supporting that view. The SignalR negotiation and demand-creation (PDF upload) contracts are **adopted** jointly with the frontend **but are not Sprint 1 implementation work**. The machine-readable HTTP contract of all three endpoints is `contracts/openapi.yaml` (workspace root), the single source of truth: this document and the OpenAPI file MUST stay identical on every HTTP detail. Later sprints should extend this document rather than silently changing existing contracts.
 
 ## 1. Normative language and scope
 
@@ -33,31 +33,37 @@
 
 ### 1.2 Explicitly OUT OF SCOPE for Sprint 1
 
-- `POST /api/v1/notifications/negotiate` and the Azure SignalR `demands` notification channel: **contract defined in §7, implementation deferred**.
+- `POST /api/v1/notifications/negotiate` and the Azure SignalR `demands` notification channel: **contract adopted in §7.1 and `contracts/openapi.yaml`, implementation deferred**.
 - `demandUpdated` publication and demand-status mutation: deferred; no status-changing HTTP endpoint is specified.
-- PDF upload, size-validation, ingestion or storage workflows: deferred; **no upload route is defined**.
-- Demand creation, update, delete, status transitions, pagination, filtering or searching.
+- `POST /api/v1/demands` (demand creation with PDF upload, size/content validation and SharePoint storage): **contract adopted in §7.3 and `contracts/openapi.yaml`, implementation deferred**.
+- Demand update, delete, status transitions (other than the initial `pending`), pagination, filtering or searching.
 - Provisioning new users via API; management of roles/users via API.
 - Additional business entities, audit-history tables, or user-role join tables.
-- The third HTTP endpoint of the overall API: planned for a later sprint, contract not yet specified; see **OPEN-01**.
+- Implementation of the two adopted non-Sprint-1 endpoints (negotiate, demand creation); see **OPEN-01**.
 
 ### 1.3 Known gaps, decisions and conflict resolution
 
 | ID | Observation / decision | Handling |
 |---|---|---|
-| OPEN-01 | The overall API is planned with **three HTTP endpoints**. Sprint 1 delivers `GET /api/v1/demands`; `POST /api/v1/notifications/negotiate` is specified in §7 (deferred); the **third endpoint** is planned for a later sprint and its contract is not yet specified. The `demandUpdated` event is **not** HTTP. | **Scheduled, not missing.** Do not create a third route or a placeholder in Sprint 1. When its contract is supplied, add it in a dedicated sprint section of this document. |
-| OPEN-02 | The broad API description includes SignalR, while the final Sprint 1 statement limits functionality to the initial user/demand screen. | The final Sprint 1 restriction takes precedence. Implement the list route now; preserve SignalR as a future contract. |
+| OPEN-01 | **Resolved.** The overall API has **three HTTP endpoints**, all with an adopted contract: `GET /api/v1/demands` (§5.1, Sprint 1), `POST /api/v1/notifications/negotiate` (§7.1) and `POST /api/v1/demands` (§7.3). The `demandUpdated` event is **not** HTTP. | The contract of all three is frozen in `contracts/openapi.yaml`. Only `GET /api/v1/demands` (plus `GET /health`) is implemented in Sprint 1; do not create placeholder routes for the other two. They are implemented in later sprints. |
+| OPEN-02 | The broad API description includes SignalR, while the final Sprint 1 statement limits functionality to the initial user/demand screen. | The final Sprint 1 restriction takes precedence for **implementation**. Implement the list route now; the SignalR negotiation contract is adopted (§7.1) and implemented later. |
 | OPEN-03 | The precise delegated API scope name, Entra tenant ID and API application ID are absent. | Supplied through configuration (§6.1: `AzureAd:*`); never hard-coded. The API refuses to start while they are missing or still placeholders. |
 | OPEN-04 | **Resolved.** The only authorization rule for now is *own data only*: an authenticated, allowlisted, active user receives exclusively the demands whose `Demand.UserId` is their own `sec.User.UserId`. | The role codes `admin`, `operational` and `guest` are confirmed as the real codes, but **no role grants or removes any access in Sprint 1**. Do not infer cross-user, administrator or role-based behavior. |
-| OPEN-05 | **Resolved.** The PDFs are stored in **SharePoint**. `Demand.BaeLink` holds the absolute HTTPS URL of the document in SharePoint. | The API returns that URL after validating that it is an absolute HTTPS URL. SharePoint permissions are the access gate: the browser opens the link with the user's own Entra single sign-on session, so no bearer header, no SAS-style signature and no anonymous link is involved. Generating time-limited sharing links through Microsoft Graph is a possible later evolution behind the `IBaeLinkResolver` abstraction; it needs a separate decision (tenant sharing policy, Graph permissions). |
-| INT-05 | `maxPdfSizeMb`: 10 MB is illustrative, not confirmed. | Deferred until an upload endpoint is specified. |
-| INT-08 | Exact error-body JSON structure is unconfirmed. | Keep status codes stable; return safe, generic `ProblemDetails` bodies, without relying on a frontend-specific error schema. |
+| OPEN-05 | **Resolved.** The PDFs are stored in **SharePoint**. `Demand.BaeLink` holds the absolute HTTPS URL of the document in SharePoint. | The API returns that URL after validating that it is an absolute HTTPS URL. SharePoint permissions are the access gate: the browser opens the link with the user's own Entra single sign-on session, so no bearer header, no SAS-style signature and no anonymous link is involved. The links are **permanent** SharePoint URLs: no time-limited, signed or anonymous sharing links are used, and `IBaeLinkResolver` stays a pass-through. Changing this needs a separate decision (tenant sharing policy, Graph permissions). |
+| INT-05 | `maxPdfSizeMb`: 10 MB is illustrative, not confirmed. | The upload endpoint is now specified (§7.3). The limit is the backend setting `Upload:MaxPdfSizeMb`, provisionally 10 (1 MB = 1,048,576 bytes); it MUST equal the webapp's `public/config/app-config.json` value and be confirmed by the operator before production. |
+| INT-08 | Exact error-body JSON structure. | **Resolved.** Every error response of an application route is RFC 9457 (7807) `application/problem+json` (§5.2). The HTTP status stays the primary signal; the frontend never renders server text. |
 | DEC-01 | Backend target framework. | **.NET 10 (`net10.0`)** from the start (SDK pinned in `global.json`). |
 | DEC-02 | Data access technology. | **Dapper** over `Microsoft.Data.SqlClient`. **Entity Framework Core, `DbContext` and EF migrations MUST NOT be used.** The SQL database project is the single owner of the schema. |
 | DEC-03 | Existing repository files take precedence over earlier draft DDL. | Primary keys are `{Table}Id`, constraint names follow the single scheme of DB-06, column sizes and defaults follow the files already present in `database/`, and the `ref` schema is kept. The draft DDL in earlier revisions of this document is superseded by §3.4. |
 | DEC-04 | Where configuration values live. | Entra, CORS and SQL settings are configuration-file values (§6.1), never code constants. |
 | DEC-05 | Seeded identity. | The seed script creates the project owner's account as an active `admin` user, as explicitly requested. Further identities are added by editing the same script. |
 | DEC-06 | Local development against Azure SQL Database. | One connection string works on a developer PC and in Azure: `Authentication=Active Directory Default` (see §6.1). No password is ever stored. |
+| DEC-07 | Hosting topology. | Backend: **Azure App Service** connected to Azure SQL Database. Frontend: **Azure Static Web Apps**. |
+| DEC-08 | Canonical HTTP contract. | `contracts/openapi.yaml` is the single source of truth for routes, schemas, status codes, headers and CORS. This document explains and constrains it; any conflict is fixed in both files in the same change. |
+| DEC-09 | JSON naming convention. | Business payloads (request parts and response bodies) use `snake_case`. The SignalR negotiation response (`url`, `accessToken`) is a protocol payload whose names are fixed by the SignalR client; it is the **only** camelCase exception and MUST NOT be renamed. |
+| DEC-10 | Success status of `POST /api/v1/demands`. | `201 Created` with the created demand as body (same shape as a `demands[]` item). There is no single-demand route, so no `Location` header is sent. The frontend treats any 2xx as success and ignores the body. |
+| DEC-11 | Delegated scope name. | The delegated scope is named `access_as_user` (fixed in the contract's OAuth2 security scheme and set in `AzureAd:RequiredScope`). The full scope requested by the SPA is `api://<API client id>/access_as_user`. |
+| OPEN-06 | How the API writes the uploaded PDF into SharePoint (for example Microsoft Graph with the App Service managed identity; site/library location, folder naming, permissions so that the demand owner can open the file). | **Open — blocks the implementation of §7.3, not its HTTP contract.** Hidden behind `IBaeDocumentStore`; needs a separate decision (tenant policy, Graph permissions). |
 
 ## 2. System context and architectural boundaries
 
@@ -81,6 +87,7 @@ flowchart LR
 - Authorization: explicit server-side SQL allowlist (`sec.User`) after JWT validation; the only access rule is *own demands only* (OPEN-04).
 - Documents: PDFs live in SharePoint; `Demand.BaeLink` stores the document URL (OPEN-05).
 - Frontend: existing Vue application hosted in Azure Static Web Apps, with Vite local development at `http://localhost:5173`.
+- Hosting (**DEC-07**): this API runs on **Azure App Service** (connected to Azure SQL Database); the frontend runs on **Azure Static Web Apps**.
 - Configuration (**DEC-04**): environment-specific; tenant ID, API client ID, delegated scope, allowed origins and the SQL connection string are configuration values, not source code (§6.1).
 - Database connection: least-privilege runtime identity; Azure-managed identity in Azure and the developer's own Entra account on a PC, both through `Authentication=Active Directory Default`. The SQL credential used by `SqlPackage` is a **deployment** concern and must not be copied into frontend settings or application settings.
 
@@ -483,6 +490,8 @@ This table is the single authority for authentication/authorization outcomes; §
 
 ## 5. HTTP API — Sprint 1
 
+> **Canonical contract (DEC-08, DEC-09).** The exact routes, schemas, status codes, headers and CORS rules are in `contracts/openapi.yaml`; this section explains them. Business JSON is `snake_case`; the only camelCase payload is the SignalR negotiation response (§7.1), whose shape is fixed by the SignalR protocol.
+
 ### 5.1 `GET /api/v1/demands` (API-01)
 
 **Purpose:** populate the initial dashboard screen with the authenticated user's display name/identifier and their demand list.
@@ -551,15 +560,29 @@ Accept: application/json
 
 ### 5.2 API errors and CORS (API-02)
 
-- `400` / `422`: malformed input or applicable request validation, with only safe optional text. (The current GET has no input body and normally requires neither.)
+- `400`: malformed or invalid request (missing, duplicated or unknown multipart part; invalid `siren_number`). `422`: well-formed request whose file content cannot be processed (the upload is not a valid PDF). Neither applies to the Sprint 1 `GET`, which has no input.
 - `401`: missing/invalid bearer authentication.
 - `403`: valid but unauthorized caller, including unknown/inactive DB user or insufficient scope.
-- `413`: reserved for a **future** PDF-upload endpoint; not applicable to the Sprint 1 read-only route.
+- `413`: uploaded PDF larger than `Upload:MaxPdfSizeMb` (§7.3); not applicable to the Sprint 1 read-only route. `415`: `POST /api/v1/demands` request that is not `multipart/form-data`.
 - `5xx`: service and dependency faults; no exception stack traces, SQL statements, token contents or connection strings in HTTP bodies.
-- **INT-08:** no fixed frontend-consumed error JSON contract yet. `ProblemDetails` MAY be used as a backend convention, but frontend correctness must depend on HTTP status rather than a mandatory `message` field.
-- Configure CORS for **exact approved origins**, including deployed Azure Static Web App origin(s) and `http://localhost:5173`. Permit the needed `GET`, `POST`, `OPTIONS` methods and `Authorization`/`Content-Type` headers. Do not use an unrestricted `*` origin policy. The origins come from configuration (`Cors:AllowedOrigins`, §6.1) and are validated at startup; the API refuses to start if an origin is malformed or is `*`.
+- **Error body (INT-08, resolved).** Every non-2xx response from an application route (`400`, `401`, `403`, `413`, `415`, `422`, `5xx`) is `application/problem+json` (RFC 9457, ASP.NET Core `ProblemDetails`) with `type`, `title`, `status`, optional `detail` (safe, generic text only), `traceId` (equal to the `X-Correlation-Id` response header) and, for `400`/`422` only, optional `errors` (object keyed by request part name — `siren_number`, `bae_file` — with arrays of safe messages). The JWT bearer challenge (`401`) returns this body too, plus a `WWW-Authenticate: Bearer` header. Both `403` outcomes have an identical shape and text. No stack trace, SQL, token content, connection string, document URL or other user's data in any body. The frontend chooses its French wording from the HTTP status (and the `errors` keys); it never renders server `title`/`detail`.
+- Configure CORS for **exact approved origins**: the deployed Azure Static Web Apps origin(s) and `http://localhost:5173`. The origins come from configuration (`Cors:AllowedOrigins`, §6.1) and are validated at startup; the API refuses to start if an origin is malformed or is `*`. Never use an unrestricted `*` policy.
+- The CORS policy MUST permit, for every route including `POST /api/v1/notifications/negotiate`:
+  - methods `GET`, `POST`, `OPTIONS`;
+  - request headers `Authorization`, `Content-Type`, `X-Requested-With` and `X-SignalR-User-Agent` (the last two are sent by the official SignalR JavaScript client when it negotiates; omitting them makes the browser preflight fail);
+  - exposed response header `X-Correlation-Id`;
+  - a preflight cache of 600 seconds (`Access-Control-Max-Age`);
+  - **no credentials**: `Access-Control-Allow-Credentials` is not sent. Authentication is the `Authorization` header only, and the frontend creates its SignalR connection with `withCredentials: false`.
+- The negotiate request has an empty body and carries the query parameter `negotiateVersion=1` (added by the SignalR client; a query parameter, not a header); the route MUST accept it. The Azure SignalR Service resource has its own CORS settings with the same origins (§7.1).
 - Enforce CORS **before** authentication failures prevent browser preflight processing. A successful OPTIONS preflight is not an authorization grant.
 - HTTPS is mandatory outside localhost. Validate proxy/forwarded-header settings only for trusted infrastructure.
+
+### 5.3 `GET /health` (API-03)
+
+Anonymous liveness/readiness probe, used by the Azure App Service health check. It is **not** under `/api/v1`, needs no token, returns no user data and reveals no dependency details. No CORS rule applies (the browser never calls it).
+
+- `200 OK`, `application/json`: `{ "status": "ok" }` when the process and its SQL dependency respond.
+- `503 Service Unavailable`, `application/json`: `{ "status": "unavailable" }` otherwise.
 
 ## 6. Security, configuration, observability and operations
 
@@ -569,30 +592,30 @@ Backend settings are bound as strongly typed options and validated at startup: t
 
 | Area | Configuration key(s) and rules |
 |---|---|
-| Entra ID | `AzureAd:Instance` (default `https://login.microsoftonline.com/`), `AzureAd:TenantId`, `AzureAd:ClientId`, `AzureAd:RequiredScope` (scope name only, e.g. `access_as_user`), optional `AzureAd:Audiences`. All mandatory; placeholders are rejected at startup. |
+| Entra ID | `AzureAd:Instance` (default `https://login.microsoftonline.com/`), `AzureAd:TenantId`, `AzureAd:ClientId`, `AzureAd:RequiredScope` (scope name only; fixed to `access_as_user` by the contract, DEC-11), optional `AzureAd:Audiences`. All mandatory; placeholders are rejected at startup. |
 | SQL | `ConnectionStrings:KlesiaDb`. Use `Authentication=Active Directory Default;Encrypt=True` so no password is stored: on a developer PC it signs in with the Azure CLI (`az login`) or Visual Studio account, in Azure with the managed identity. Prerequisites: the client IP is allowed in the Azure SQL firewall, and the Entra identity is a database user with read access (`CREATE USER [name] FROM EXTERNAL PROVIDER; ALTER ROLE db_datareader ADD MEMBER [name];`). |
 | Frontend | `Cors:AllowedOrigins` — array of exact origins (`http://localhost:5173`, the deployed Static Web App URL). Validated at startup: no path, HTTPS required except loopback, `*` forbidden. Empty means no cross-origin access. |
 | Configuration sources | Precedence, lowest to highest: `appsettings.json` (empty values, tracked) → `appsettings.{Environment}.json` (placeholders, tracked) → `appsettings.Local.json` (personal values, **git-ignored**) → environment variables (`AzureAd__TenantId`, `Cors__AllowedOrigins__0`, `ConnectionStrings__KlesiaDb`). |
 | Logging | Log level, correlation id (`X-Correlation-Id`, generated when absent or unsafe), telemetry backend if already used. |
-| Future SignalR | SignalR endpoint/resource name, managed identity configuration and hub identifier `demands` |
-| Future PDF | `maxPdfSizeMb` pending confirmation; optional Microsoft Graph sharing-link settings if OPEN-05 evolves. Nothing is needed in Sprint 1: SharePoint links are returned as stored. |
+| SignalR (adopted, implemented after Sprint 1) | SignalR endpoint/resource name, managed identity configuration and hub identifier `demands`; the Azure SignalR Service CORS origins equal `Cors:AllowedOrigins`. |
+| PDF upload (adopted, implemented after Sprint 1) | `Upload:MaxPdfSizeMb` — maximum PDF size in MB (1 MB = 1,048,576 bytes), provisionally `10`, identical to the webapp's `maxPdfSizeMb`; request-size limits (Kestrel, `FormOptions`) MUST be aligned to it; SharePoint site/library settings (OPEN-06). Nothing is needed in Sprint 1: SharePoint links are returned as stored. |
 
 Store credentials and connection secrets in environment-specific secret stores or managed identity configuration. Avoid checking credentials into `appsettings.json`, `.env` tracked files, Bicep parameter defaults, `Azure.publish.xml`, examples, log files or simulator artifacts.
 
 ### 6.2 Logs and operational behavior
 
-- Structured request logs SHOULD include route, outcome/status, duration and correlation ID; do not log raw JWTs, authorization headers, document URLs, email addresses, document contents or complete connection strings.
+- Structured request logs SHOULD include route, outcome/status, duration and correlation ID; do not log raw JWTs, authorization headers, document URLs, SIREN numbers, uploaded file names, email addresses, document contents or complete connection strings.
 - Log exceptions on the server with appropriate access controls; provide generic client errors.
 - Fail closed on authentication/authorization failures; fail with `5xx` on actual database outages.
 - Parameterize every SQL query through Dapper parameters. Never interpolate or concatenate `oid` or any user input into SQL text.
-- Backend SQL credentials/managed identity SHOULD have minimum runtime permissions: read access to the four necessary tables; database-schema deployment uses a distinct, more privileged principal.
+- Backend SQL credentials/managed identity SHOULD have minimum runtime permissions: read access to the four necessary tables, plus `INSERT` on `dbo.Demand` once `POST /api/v1/demands` ships (read-only until then); database-schema deployment uses a distinct, more privileged principal.
 - Test CORS behavior from the frontend origin, including `OPTIONS` preflight and rejected authentication.
 
-## 7. Preserved future API contracts — NOT to be implemented in Sprint 1
+## 7. Adopted contracts — implemented after Sprint 1
 
-These requirements are frozen as intended integration interfaces for future sprints. They are not additional Sprint 1 deliverables, and their inclusion does not authorize inventing new routes.
+These contracts are **adopted** jointly with the frontend and are frozen in `contracts/openapi.yaml`. They are **not Sprint 1 deliverables**: do not implement them, and do not add placeholder routes, until their sprint starts. Together with `GET /api/v1/demands` they make up the complete HTTP surface of three endpoints (OPEN-01).
 
-### 7.1 `POST /api/v1/notifications/negotiate` (DEFERRED)
+### 7.1 `POST /api/v1/notifications/negotiate` (ADOPTED — implemented after Sprint 1)
 
 ```http
 POST /api/v1/notifications/negotiate HTTP/1.1
@@ -616,8 +639,10 @@ Success: `200 OK`:
 - Use backend managed identity to access Azure SignalR. The supplied infrastructure contract assigns **SignalR Service Owner** in Bicep, which matches a serverless negotiate + REST-publish use case; verify that resource mode and role assignments are consistent at implementation time. Never return the service access key to the browser.
 - Explicitly configure API and Azure SignalR allowed frontend origins (Azure resource/Bicep where relevant).
 - Do not add a separately exposed, unprotected `/negotiate` endpoint.
+- **Response shape (DEC-09).** `200 OK`, `application/json`, exactly `{ "url", "accessToken" }`. These two camelCase names are fixed by the SignalR protocol and are the only exception to the `snake_case` rule. Errors: `401`/`403` as for `GET /api/v1/demands`, safe `5xx`; all as `application/problem+json`.
+- The request has no body. The SignalR client appends `?negotiateVersion=1` and sends, besides `Authorization`, the headers `X-Requested-With` and `X-SignalR-User-Agent`; the CORS policy (§5.2) MUST allow them. The frontend creates the connection without credentials (`withCredentials: false`).
 
-### 7.2 `demandUpdated` server-to-client event (DEFERRED)
+### 7.2 `demandUpdated` server-to-client event (ADOPTED — implemented after Sprint 1)
 
 | Property | Contract |
 |---|---|
@@ -625,17 +650,47 @@ Success: `200 OK`:
 | Client method name | `demandUpdated` (case-sensitive) |
 | Payload | **No arguments**; any unexpected payload is ignored by the frontend |
 | Recipient | Owning user only, selected by stable Entra `oid` |
-| Trigger | Demand status change; optionally a newly visible demand |
+| Trigger | Demand status change, and a newly created demand becoming visible (after `POST /api/v1/demands`) |
 | Delivery | At-most-once, best effort; no replay or durable event history |
 | Client recovery | Reload `GET /api/v1/demands` after (re)connection or receiving the event |
 
 Do **not** broadcast demand activity to all connections. Future status-update integrations must establish the correct owner from the database or trusted business event, never from an untrusted client-supplied owner claim. No producer or status mutation endpoint has been specified yet.
 
-### 7.3 Future upload and local simulator (DEFERRED)
+### 7.3 `POST /api/v1/demands` — create a demand with its BAE PDF (ADOPTED — implemented after Sprint 1)
 
-- Upload request validation and gateway/backend payload size limits MUST eventually use the same confirmed `maxPdfSizeMb` value. The illustrative 10 MB is **not** a definitive acceptance criterion.
-- No PDF-upload endpoint, multipart contract, request parameters or response shape have been provided; do not invent any in Sprint 1.
-- `tools/dev-simulator/`, when implemented, should emulate the **specified** real routes and event behavior with the same response types, error codes and identity protections. At present the simulator is not implemented; do not count it as an existing dependency or Sprint 1 deliverable.
+```http
+POST /api/v1/demands HTTP/1.1
+Authorization: Bearer <Entra access token>
+Content-Type: multipart/form-data; boundary=<generated by the client>
+```
+
+**Request parts** (exactly these two; the part names are the contract):
+
+| Part | Type | Rule |
+|---|---|---|
+| `siren_number` | text | Exactly nine ASCII digits, no spaces or hyphens: `^[0-9]{9}$`. Leading zeros kept. The frontend strips separators before sending. No checksum rule. |
+| `bae_file` | file | Exactly one PDF (`application/pdf`), at most `Upload:MaxPdfSizeMb` MB. |
+
+There is **no `user_id` part** and none is read: the owner is always the user of the validated token.
+
+**Processing rules:**
+
+1. Same evaluation order as §4 (token → scope → active allowlisted user); failures give the same `401`/`403` as the `GET` and store nothing.
+2. Reject a non-multipart request (`415`); a missing, duplicated or unknown part or an invalid SIREN (`400`); an oversized file (`413`); a file that is not a real PDF (`422`: the content starts with `%PDF-` and the declared type is `application/pdf`; the file extension and the client MIME type are never trusted alone).
+3. Store the PDF in SharePoint through `IBaeDocumentStore` and obtain its permanent HTTPS URL (OPEN-06).
+4. Insert one `dbo.Demand` row: `UserId` = the matched user, `SirenNumber` = the nine digits, `BaeLink` = that URL, `StatusId` = the status whose code is `pending`. If the insert fails after the upload, remove the stored document on a best-effort basis and return `5xx`.
+5. Respond `201 Created` (DEC-10) with the created demand as JSON, shaped like a `demands[]` item of §5.1 (`demand_id`, `siren_number` formatted `XXX-XXX-XXX`, `bae_link`, `status: "pending"`). No `Location` header (no single-demand route exists).
+6. **Read-after-write:** the row is committed before `201` is sent, so the next `GET /api/v1/demands` already contains the demand.
+7. **Duplicates allowed (INT-09):** the same SIREN or document may be submitted again; each call creates a new demand. The operation is not idempotent and the frontend never retries it automatically.
+8. After the commit the backend publishes `demandUpdated` to the owner (§7.2).
+9. Never log the file name, file content, SIREN or document URL.
+10. Request-size limits (Kestrel, App Service, `FormOptions.MultipartBodyLengthLimit`) MUST be aligned with `Upload:MaxPdfSizeMb` plus multipart overhead, so that an oversized file yields `413` and not a transport error.
+
+**Status codes:** `201`, `400`, `401`, `403`, `413`, `415`, `422`, `500`, `503`; error bodies per §5.2.
+
+### 7.4 Local simulator
+
+The frontend repository provides the dev-only simulator (`klesia_webapp/tools/dev-simulator/`, webapp specification §2.2) that mimics these routes. This repository does not need one, and the simulator is never proof that the real backend conforms: conformity is checked against `contracts/openapi.yaml`.
 
 ## 8. Implementation structure
 
@@ -684,9 +739,21 @@ Keep token validation separate from business query logic. Avoid introducing unre
 | AT-15 | Invalid SQL foreign key or invalid status/SIREN/link value | INSERT in test DB | Constraint rejection |
 | AT-16 | Same company SIREN on distinct demands | INSERT | Allowed; no uniqueness on `Demand.SirenNumber` |
 | AT-17 | SQL project republished with existing records | `SqlPackage /Action:Publish` | No unintended records deleted; idempotent seeds |
-| AT-18 | Unauthorized user requests any future negotiation route, if introduced later | POST | Same `401`/`403` policy; **not an S1 test until route implemented** |
+| AT-18 | Unauthorized user requests the negotiation route | POST | Same `401`/`403` policy; **not an S1 test until the route is implemented** |
 | AT-19 | Valid scoped token, active user, a stored `BaeLink` that is not an absolute HTTPS URL | GET | `5xx`, sanitized body; the stored value is not disclosed |
 | AT-20 | Valid access token without an `oid` claim | GET | `401` |
+| AT-21 | Any `401`, `403` or `5xx` from an application route | GET | `application/problem+json` body with `title`, `status`, `traceId`; no internal detail; `X-Correlation-Id` header present |
+| AT-22 | `GET /health` without a token | GET | `200` `{"status":"ok"}`; `503` `{"status":"unavailable"}` when SQL is unreachable |
+| AT-23 | **(post-Sprint 1)** Active user, valid `siren_number` and PDF `bae_file` | POST `/api/v1/demands` | `201`; body is the demand with `status: pending` and formatted SIREN; the next GET lists it first; `bae_link` is HTTPS |
+| AT-24 | **(post-Sprint 1)** `siren_number` not exactly nine digits (letters, separators, too short) | POST `/api/v1/demands` | `400` problem+json with `errors.siren_number`; nothing stored |
+| AT-25 | **(post-Sprint 1)** Missing or duplicated `bae_file`, or an extra part such as `user_id` | POST `/api/v1/demands` | `400`; nothing stored |
+| AT-26 | **(post-Sprint 1)** File that is not a PDF (wrong magic bytes or declared type) | POST `/api/v1/demands` | `422`; nothing stored |
+| AT-27 | **(post-Sprint 1)** PDF larger than `Upload:MaxPdfSizeMb` | POST `/api/v1/demands` | `413`; nothing stored |
+| AT-28 | **(post-Sprint 1)** Body is not `multipart/form-data` | POST `/api/v1/demands` | `415` |
+| AT-29 | **(post-Sprint 1)** No token, missing scope, unknown or inactive user | POST `/api/v1/demands` | Same `401`/`403` policy as GET; nothing stored |
+| AT-30 | **(post-Sprint 1)** Same SIREN submitted twice | POST `/api/v1/demands` | Both `201`; two distinct demands |
+| AT-31 | **(post-Sprint 1)** Active user, valid token | POST `/api/v1/notifications/negotiate` | `200` `{url, accessToken}`; SignalR `userId` = `oid` |
+| AT-32 | **(post-Sprint 1)** Preflight from an approved origin asking for `Authorization`, `X-Requested-With`, `X-SignalR-User-Agent` | OPTIONS negotiate | Allowed; no `Access-Control-Allow-Credentials`; unapproved origin gets no CORS grant |
 
 **Definition of Done — Sprint 1**
 
@@ -702,13 +769,13 @@ Keep token validation separate from business query logic. Avoid introducing unre
 - [ ] Automated coverage exists for the Sprint 1 acceptance matrix; instructions to run/build/test/deploy are committed to the repository.
 - [ ] Data access uses Dapper only: no Entity Framework Core package, `DbContext` or migration exists in the solution.
 - [ ] The solution targets `net10.0`; AT-15, AT-16 and AT-17 are runnable against a disposable Azure SQL database (`KLESIA_TEST_SQL_CONNECTION`).
-- [ ] Deferred SignalR/upload routes and the third endpoint are **not presented as delivered**; unresolved decisions remain recorded.
+- [ ] The adopted post-Sprint-1 routes (negotiate, `POST /api/v1/demands`) are **not presented as delivered**; unresolved decisions (OPEN-06) remain recorded.
 
 ## 10. Implementation instructions for coding agents
 
 1. **Inspect before changing:** inspect the existing repository tree, the SQL project, `01_RefData.sql`, `02_User.sql`, current frontend integration contracts, `.publish.xml` and infrastructure conventions. Do not overwrite initialized files unnecessarily.
-2. **Implement only Sprint 1:** deliver the database plus `GET /api/v1/demands` with Entra access-token authentication and SQL allowlist authorization. Preserve, but do not implement, §7 future contracts.
-3. **Avoid speculative features:** do not add a second or third HTTP route (the third endpoint is planned for a later sprint, OPEN-01), a status mutation API, an upload API, user-admin CRUD, role hierarchies, additional tables or SignalR stubs that return fake production data.
+2. **Implement only Sprint 1:** deliver the database, `GET /api/v1/demands` (Entra access-token authentication and SQL allowlist authorization) and `GET /health`. Preserve, but do not implement, the adopted §7 contracts, and keep `contracts/openapi.yaml` identical to this document.
+3. **Avoid speculative features:** do not add any route beyond the three of `contracts/openapi.yaml` and `/health` (and, in Sprint 1, only `GET /api/v1/demands` and `/health`), a status mutation API, user-admin CRUD, role hierarchies, additional tables or SignalR stubs that return fake production data.
 4. **Follow contracts verbatim:** preserve table names, schema names, the constraint-naming scheme of DB-06, JSON field names, HTTP statuses and identity mapping.
 5. **Dapper only (DEC-02):** do not add Entity Framework Core packages, a `DbContext`, entity configurations or migrations. Write parameterized SQL in `Infrastructure` repositories; schema changes go through the SQL project.
 6. **Keep credentials external:** do not use illustrative server names/passwords as executable defaults, and do not include real Entra access tokens or real document URLs in tests/logs. Personal configuration goes into the git-ignored `appsettings.Local.json` or environment variables.

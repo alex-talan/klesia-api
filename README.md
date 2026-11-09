@@ -2,7 +2,7 @@
 
 Backend of the KLESIA application: secure REST APIs on **.NET 10**, **Azure SQL Database** accessed with **Dapper**, authentication with **Microsoft Entra ID** and database-driven authorization. Development is incremental (Agile): the specification in [`docs/specs/SPECIFICATIONS.md`](docs/specs/SPECIFICATIONS.md) is delivered sprint by sprint.
 
-**Sprint 1:** `GET /api/v1/demands` returns the signed-in user's identity and only their own demands. Everything else in the specification (SignalR negotiation, PDF upload, the third endpoint) is deferred.
+**Sprint 1:** `GET /api/v1/demands` returns the signed-in user's identity and only their own demands. Everything else in the specification (SignalR negotiation and `POST /api/v1/demands` with PDF upload, whose contracts are already adopted in `contracts/openapi.yaml`) is deferred to later sprints.
 
 ## Repository layout
 
