@@ -12,7 +12,7 @@ Backend of the KLESIA application: secure REST APIs on **.NET 10**, **Azure SQL 
 ├── database/Klesia.Database     SQL database project (owns the schema; builds a DACPAC)
 ├── docs/                        SPECIFICATIONS.md, local-development.md
 ├── src/
-│   ├── Domain                   ApplicationUser, Demand, SirenNumber
+│   ├── Domain                   ApplicationUser, Demand, GKNumber
 │   ├── Application              use cases (DemandService), DTOs, repository abstractions
 │   ├── Infrastructure           Dapper repositories, SQL connection, SharePoint link resolver
 │   └── WebApi                   controllers, Entra authentication, CORS, logging, composition root

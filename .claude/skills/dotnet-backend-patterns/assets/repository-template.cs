@@ -11,7 +11,7 @@ namespace Klesia.Templates;
 
 #region Domain/Demands/Demand.cs
 
-public sealed record Demand(int DemandId, string SirenNumber, string BaeLink, string StatusCode);
+public sealed record Demand(int DemandId, string GKNumber, string BaeLink, string StatusCode);
 
 #endregion
 
@@ -23,7 +23,7 @@ public interface IDemandRepository
 
     Task<IReadOnlyList<Demand>> ListByUserAsync(int userId, CancellationToken cancellationToken);
 
-    Task<int> CreateAsync(int userId, string sirenNumber, string baeLink, CancellationToken cancellationToken);
+    Task<int> CreateAsync(int userId, string gkNumber, string baeLink, CancellationToken cancellationToken);
 
     Task<bool> UpdateStatusAsync(int demandId, string statusCode, CancellationToken cancellationToken);
 }
@@ -58,7 +58,7 @@ internal sealed class DemandRepository(ISqlConnectionFactory connectionFactory) 
     public async Task<Demand?> FindByIdAsync(int demandId, CancellationToken cancellationToken)
     {
         const string sql = """
-            SELECT d.DemandId, d.SirenNumber, d.BaeLink, s.Code AS StatusCode
+            SELECT d.DemandId, d.GKNumber, d.BaeLink, s.Code AS StatusCode
             FROM dbo.Demand AS d
             INNER JOIN ref.Status AS s ON s.StatusId = d.StatusId
             WHERE d.DemandId = @DemandId
@@ -72,7 +72,7 @@ internal sealed class DemandRepository(ISqlConnectionFactory connectionFactory) 
     public async Task<IReadOnlyList<Demand>> ListByUserAsync(int userId, CancellationToken cancellationToken)
     {
         const string sql = """
-            SELECT d.DemandId, d.SirenNumber, d.BaeLink, s.Code AS StatusCode
+            SELECT d.DemandId, d.GKNumber, d.BaeLink, s.Code AS StatusCode
             FROM dbo.Demand AS d
             INNER JOIN ref.Status AS s ON s.StatusId = d.StatusId
             WHERE d.UserId = @UserId
@@ -88,15 +88,15 @@ internal sealed class DemandRepository(ISqlConnectionFactory connectionFactory) 
 
     public async Task<int> CreateAsync(
         int userId,
-        string sirenNumber,
+        string gkNumber,
         string baeLink,
         CancellationToken cancellationToken)
     {
         // The status id is resolved in SQL from its stable code, never hardcoded in C#.
         const string sql = """
-            INSERT INTO dbo.Demand (UserId, SirenNumber, BaeLink, StatusId)
+            INSERT INTO dbo.Demand (UserId, GKNumber, BaeLink, StatusId)
             OUTPUT INSERTED.DemandId
-            SELECT @UserId, @SirenNumber, @BaeLink, s.StatusId
+            SELECT @UserId, @GKNumber, @BaeLink, s.StatusId
             FROM ref.Status AS s
             WHERE s.Code = N'pending'
             """;
@@ -107,7 +107,7 @@ internal sealed class DemandRepository(ISqlConnectionFactory connectionFactory) 
             return await connection.QuerySingleAsync<int>(
                 new CommandDefinition(
                     sql,
-                    new { UserId = userId, SirenNumber = sirenNumber, BaeLink = baeLink },
+                    new { UserId = userId, GKNumber = gkNumber, BaeLink = baeLink },
                     cancellationToken: cancellationToken));
         }
         catch (SqlException ex) when (ex.Number is 2627 or 2601 or 547 or 515)

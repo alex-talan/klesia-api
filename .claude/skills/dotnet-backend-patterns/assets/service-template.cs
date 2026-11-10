@@ -2,6 +2,7 @@
 // Business failures are exceptions; WebApi maps them to ProblemDetails (GlobalExceptionHandler).
 // No Result<T>, FluentValidation, cache or Redis: they are not part of the stack.
 
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 
 namespace Klesia.Templates;
@@ -11,22 +12,25 @@ namespace Klesia.Templates;
 public sealed record User(int UserId, Guid UserUniqueId, string Name, string Email);
 
 /// <summary>
-/// Value object guarding its own invariant: exactly nine ASCII digits (mirrors CK_Demand_SirenNumber).
+/// Value object guarding its own invariant: format GK######-######### (mirrors CK_Demand_GKNumber).
 /// </summary>
-public readonly record struct SirenNumber
+public readonly partial record struct GKNumber
 {
-    private SirenNumber(string value) => Value = value;
+    private GKNumber(string value) => Value = value;
 
     public string Value { get; }
 
-    public static SirenNumber Parse(string? value)
+    [GeneratedRegex(@"^GK[0-9]{6}-[0-9]{9}\z", RegexOptions.CultureInvariant)]
+    private static partial Regex GkPattern();
+
+    public static GKNumber Parse(string? value)
     {
-        if (value is null || value.Length != 9 || !value.All(char.IsAsciiDigit))
+        if (value is null || !GkPattern().IsMatch(value))
         {
-            throw new ArgumentException("A SIREN number must be exactly nine digits.", nameof(value));
+            throw new ArgumentException("A GK number must match GK######-######### (e.g. GK260902-144743112).", nameof(value));
         }
 
-        return new SirenNumber(value);
+        return new GKNumber(value);
     }
 
     public override string ToString() => Value;
@@ -53,7 +57,7 @@ public interface IUserRepository
 
 #region Application/Demands
 
-public sealed record DemandDto(int DemandId, string SirenNumber, string BaeLink, string Status);
+public sealed record DemandDto(int DemandId, string GKNumber, string BaeLink, string Status);
 
 public sealed record UserDemandsDto(string UserName, IReadOnlyList<DemandDto> Demands);
 
@@ -73,26 +77,26 @@ public sealed class DemandService(
 
         return new UserDemandsDto(
             user.Name,
-            items.Select(d => new DemandDto(d.DemandId, d.SirenNumber, d.BaeLink, d.StatusCode)).ToList());
+            items.Select(d => new DemandDto(d.DemandId, d.GKNumber, d.BaeLink, d.StatusCode)).ToList());
     }
 
     public async Task<int> CreateAsync(
         Guid userUniqueId,
-        string sirenNumber,
+        string gkNumber,
         string baeLink,
         CancellationToken cancellationToken)
     {
         User user = await users.FindActiveByUniqueIdAsync(userUniqueId, cancellationToken)
             ?? throw new ForbiddenException("The caller is not an active user.");
 
-        SirenNumber siren = SirenNumber.Parse(sirenNumber);
+        GKNumber gk = GKNumber.Parse(gkNumber);
 
         if (!Uri.TryCreate(baeLink, UriKind.Absolute, out Uri? uri) || uri.Scheme != Uri.UriSchemeHttps)
         {
             throw new ArgumentException("The BAE link must be an absolute https URL.", nameof(baeLink));
         }
 
-        return await demands.CreateAsync(user.UserId, siren.Value, uri.AbsoluteUri, cancellationToken);
+        return await demands.CreateAsync(user.UserId, gk.Value, uri.AbsoluteUri, cancellationToken);
     }
 }
 

@@ -117,7 +117,7 @@ flowchart LR
 | Primary key | `PK_{Table}` | `PK_Role`, `PK_Demand` |
 | Foreign key | `FK_{Table}_{ReferencedTable}` (the table that holds the column first) | `FK_User_Role`, `FK_Demand_User`, `FK_Demand_Status` |
 | Unique (alternate) key | `AK_{Table}_{Column}` | `AK_Role_Code`, `AK_User_UserUniqueId`, `AK_Status_Code` |
-| Check | `CK_{Table}_{Column}` (or `{Rule}` when it spans columns) | `CK_Status_Code`, `CK_Demand_SirenNumber`, `CK_Demand_BaeLink` |
+| Check | `CK_{Table}_{Column}` (or `{Rule}` when it spans columns) | `CK_Status_Code`, `CK_Demand_GKNumber`, `CK_Demand_BaeLink` |
 | Default | `DF_{Table}_{Column}` | `DF_User_RoleId`, `DF_User_IsActive` |
 | Non-unique index | `IX_{Table}_{Column}[_{Column}]` | `IX_User_RoleId`, `IX_Demand_UserId`, `IX_Demand_StatusId` |
 
@@ -152,7 +152,7 @@ erDiagram
     Demand {
       int DemandId PK
       int UserId FK
-      char SirenNumber
+      char GKNumber
       nvarchar BaeLink
       int StatusId FK
     }
@@ -208,13 +208,13 @@ Status `Code` is the source of the API `status` property; do not return the `Nam
 |---|---|---|---|
 | `DemandId` | `INT IDENTITY(1,1)` | No | `PK_Demand` |
 | `UserId` | `INT` | No | `FK_Demand_User` → `sec.User(UserId)`; indexed by `IX_Demand_UserId` |
-| `SirenNumber` | `CHAR(9)` | No | Exactly nine ASCII digits, no punctuation (`CK_Demand_SirenNumber`) |
+| `GKNumber` | `CHAR(18)` | No | GK (Geode Klesia) number: `GK` + six digits (a `YYMMDD` date) + hyphen + nine digits, e.g. `GK260902-144743112` (`CK_Demand_GKNumber`) |
 | `BaeLink` | `NVARCHAR(2048)` | No | Absolute HTTPS URL of the PDF in SharePoint; checked at least for the HTTPS prefix (`CK_Demand_BaeLink`) |
 | `StatusId` | `INT` | No | `FK_Demand_Status` → `ref.Status(StatusId)`; indexed by `IX_Demand_StatusId` |
 
-**SIREN is a string.** It is stored as text (`CHAR(9)`), carried as a string in the domain (`SirenNumber`), in the DTOs and in JSON — never as a number — so that leading zeros are preserved and display formatting stays separate from identity. The database check enforces **exactly nine digits** with a literal digit pattern (a `NOT LIKE '%[^0-9]%'` check alone would accept a shorter value padded with spaces). A SIREN checksum rule is **not** required in this sprint.
+**The GK number is a string.** It is stored as text (`CHAR(18)`), carried as a string in the domain (`GKNumber`), in the DTOs and in JSON, exactly as stored (no reformatting). Its format is `GK` + six digits (a date, `YYMMDD`) + a hyphen (`-`) + a number of nine digits, e.g. `GK260902-144743112` (regex `^GK[0-9]{6}-[0-9]{9}$`). The database check enforces this format with a literal pattern and a binary collation (so that the prefix is case-sensitive and a shorter value padded with spaces is rejected). Validating that the six digits form a real calendar date, or any checksum, is **not** required in this sprint.
 
-The SIREN identifies a *company*; `Demand.SirenNumber` MUST **NOT** be unique: several demands about the same company must remain possible.
+`Demand.GKNumber` MUST **NOT** be unique: several demands with the same GK number must remain possible.
 
 `BaeLink` is an application-owned reference to a SharePoint document (OPEN-05). It is returned to the client unchanged once validated as an absolute HTTPS URL. The frontend must not construct document URLs itself.
 
@@ -296,14 +296,14 @@ CREATE TABLE [dbo].[Demand]
 (
     [DemandId] INT IDENTITY(1,1) NOT NULL,
     [UserId] INT NOT NULL,
-    [SirenNumber] CHAR(9) NOT NULL,
+    [GKNumber] CHAR(18) NOT NULL,
     [BaeLink] NVARCHAR(2048) NOT NULL,
     [StatusId] INT NOT NULL,
     CONSTRAINT [PK_Demand] PRIMARY KEY CLUSTERED ([DemandId]),
     CONSTRAINT [FK_Demand_User] FOREIGN KEY ([UserId]) REFERENCES [sec].[User] ([UserId]),
     CONSTRAINT [FK_Demand_Status] FOREIGN KEY ([StatusId]) REFERENCES [ref].[Status] ([StatusId]),
-    CONSTRAINT [CK_Demand_SirenNumber] CHECK
-        ([SirenNumber] COLLATE Latin1_General_100_BIN2 LIKE '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'),
+    CONSTRAINT [CK_Demand_GKNumber] CHECK
+        ([GKNumber] COLLATE Latin1_General_100_BIN2 LIKE 'GK[0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'),
     CONSTRAINT [CK_Demand_BaeLink] CHECK ([BaeLink] LIKE N'https://%')
 );
 GO
@@ -410,8 +410,8 @@ The following checks are mandatory (the automated ones are in `tests/Integration
 2. Publish to an **empty** Azure SQL dev/test database creates the `sec` and `ref` schemas and the four expected tables.
 3. All `PK_*`, `FK_*`, `AK_*`, `CK_*`, `DF_*` and `IX_*` objects exist with the names defined by the DB-06 scheme.
 4. Foreign keys reject orphan user-role, demand-user and demand-status references.
-5. Duplicate `Role.Code`, `Status.Code` and `User.UserUniqueId` values fail; repeated `Demand.SirenNumber` values **succeed**.
-6. SIREN values that are not exactly nine digits (letters, short, embedded space), non-HTTPS `BaeLink` and unsupported status codes fail.
+5. Duplicate `Role.Code`, `Status.Code` and `User.UserUniqueId` values fail; repeated `Demand.GKNumber` values **succeed**.
+6. GK values that do not match the `GK######-#########` format (wrong prefix, letters, short, embedded space, missing hyphen), non-HTTPS `BaeLink` and unsupported status codes fail.
 7. Re-running the publish and reference scripts does not create duplicate seed data, wipe business records or reactivate inactive users.
 8. An inactive user and a user without any demands can exist without breaking referential integrity.
 
@@ -513,7 +513,7 @@ Accept: application/json
   "demands": [
     {
       "demand_id": 1,
-      "siren_number": "732-829-320",
+      "gk_number": "GK260902-144743112",
       "bae_link": "https://files.example.com/bae-1.pdf",
       "status": "pending"
     }
@@ -529,7 +529,7 @@ Accept: application/json
 | `user_name` | string | `sec.User.Name` from matched active DB row. |
 | `demands` | array | All demand rows whose `Demand.UserId` is the matched internal `sec.User.UserId` (zero or more). |
 | `demands[].demand_id` | integer | `dbo.Demand.DemandId`. |
-| `demands[].siren_number` | string | `dbo.Demand.SirenNumber`, presented as `XXX-XXX-XXX`. The backend performs formatting. |
+| `demands[].gk_number` | string | `dbo.Demand.GKNumber`, returned unchanged (e.g. `GK260902-144743112`). No formatting is applied. |
 | `demands[].bae_link` | string | `dbo.Demand.BaeLink`: the **HTTPS URL** of the corresponding PDF in SharePoint, validated by the backend. It opens in the browser with the user's own SharePoint/Entra session, without a frontend-provided bearer Authorization header. |
 | `demands[].status` | string enum | `ref.Status.Code`, exclusively `pending`, `ok`, `fail`. |
 
@@ -549,7 +549,7 @@ Accept: application/json
 2. Resolve an active `sec.User` using validated `oid`; otherwise return `403`.
 3. Read demands only where `dbo.Demand.UserId = sec.User.UserId`; join `ref.Status` by `StatusId`.
 4. Map the response to exactly the specified snake_case field names and types; no database rows or domain objects serialized directly.
-5. Convert stored 9-digit SIREN to three groups separated by hyphens.
+5. Return the stored GK number unchanged (no formatting).
 6. Return the stored status code verbatim (from the three allowed lowercase codes).
 7. Resolve `BaeLink` through the link-resolver abstraction. In Sprint 1 the stored SharePoint URL is returned unchanged after verifying that it is an absolute HTTPS URL; a stored value that is not (data-integrity fault) produces a sanitized `5xx` and is never logged or returned. Never create anonymous links, never expose credentials, and never assume the frontend can attach the API bearer token when opening the PDF.
 8. **ASSUMPTION:** order demands by `Demand.DemandId DESC` for deterministic display until a product ordering requirement is defined. The frontend MUST NOT treat this ordering as a permanent business contract.
@@ -560,12 +560,12 @@ Accept: application/json
 
 ### 5.2 API errors and CORS (API-02)
 
-- `400`: malformed or invalid request (missing, duplicated or unknown multipart part; invalid `siren_number`). `422`: well-formed request whose file content cannot be processed (the upload is not a valid PDF). Neither applies to the Sprint 1 `GET`, which has no input.
+- `400`: malformed or invalid request (missing, duplicated or unknown multipart part; invalid `gk_number`). `422`: well-formed request whose file content cannot be processed (the upload is not a valid PDF). Neither applies to the Sprint 1 `GET`, which has no input.
 - `401`: missing/invalid bearer authentication.
 - `403`: valid but unauthorized caller, including unknown/inactive DB user or insufficient scope.
 - `413`: uploaded PDF larger than `Upload:MaxPdfSizeMb` (§7.3); not applicable to the Sprint 1 read-only route. `415`: `POST /api/v1/demands` request that is not `multipart/form-data`.
 - `5xx`: service and dependency faults; no exception stack traces, SQL statements, token contents or connection strings in HTTP bodies.
-- **Error body (INT-08, resolved).** Every non-2xx response from an application route (`400`, `401`, `403`, `413`, `415`, `422`, `5xx`) is `application/problem+json` (RFC 9457, ASP.NET Core `ProblemDetails`) with `type`, `title`, `status`, optional `detail` (safe, generic text only), `traceId` (equal to the `X-Correlation-Id` response header) and, for `400`/`422` only, optional `errors` (object keyed by request part name — `siren_number`, `bae_file` — with arrays of safe messages). The JWT bearer challenge (`401`) returns this body too, plus a `WWW-Authenticate: Bearer` header. Both `403` outcomes have an identical shape and text. No stack trace, SQL, token content, connection string, document URL or other user's data in any body. The frontend chooses its French wording from the HTTP status (and the `errors` keys); it never renders server `title`/`detail`.
+- **Error body (INT-08, resolved).** Every non-2xx response from an application route (`400`, `401`, `403`, `413`, `415`, `422`, `5xx`) is `application/problem+json` (RFC 9457, ASP.NET Core `ProblemDetails`) with `type`, `title`, `status`, optional `detail` (safe, generic text only), `traceId` (equal to the `X-Correlation-Id` response header) and, for `400`/`422` only, optional `errors` (object keyed by request part name — `gk_number`, `bae_file` — with arrays of safe messages). The JWT bearer challenge (`401`) returns this body too, plus a `WWW-Authenticate: Bearer` header. Both `403` outcomes have an identical shape and text. No stack trace, SQL, token content, connection string, document URL or other user's data in any body. The frontend chooses its French wording from the HTTP status (and the `errors` keys); it never renders server `title`/`detail`.
 - Configure CORS for **exact approved origins**: the deployed Azure Static Web Apps origin(s) and `http://localhost:5173`. The origins come from configuration (`Cors:AllowedOrigins`, §6.1) and are validated at startup; the API refuses to start if an origin is malformed or is `*`. Never use an unrestricted `*` policy.
 - The CORS policy MUST permit, for every route including `POST /api/v1/notifications/negotiate`:
   - methods `GET`, `POST`, `OPTIONS`;
@@ -604,7 +604,7 @@ Store credentials and connection secrets in environment-specific secret stores o
 
 ### 6.2 Logs and operational behavior
 
-- Structured request logs SHOULD include route, outcome/status, duration and correlation ID; do not log raw JWTs, authorization headers, document URLs, SIREN numbers, uploaded file names, email addresses, document contents or complete connection strings.
+- Structured request logs SHOULD include route, outcome/status, duration and correlation ID; do not log raw JWTs, authorization headers, document URLs, GK numbers, uploaded file names, email addresses, document contents or complete connection strings.
 - Log exceptions on the server with appropriate access controls; provide generic client errors.
 - Fail closed on authentication/authorization failures; fail with `5xx` on actual database outages.
 - Parameterize every SQL query through Dapper parameters. Never interpolate or concatenate `oid` or any user input into SQL text.
@@ -668,7 +668,7 @@ Content-Type: multipart/form-data; boundary=<generated by the client>
 
 | Part | Type | Rule |
 |---|---|---|
-| `siren_number` | text | Exactly nine ASCII digits, no spaces or hyphens: `^[0-9]{9}$`. Leading zeros kept. The frontend strips separators before sending. No checksum rule. |
+| `gk_number` | text | GK number matching `^GK[0-9]{6}-[0-9]{9}$` (e.g. `GK260902-144743112`): `GK`, six digits, a hyphen, nine digits. No surrounding or embedded spaces. No date-validity or checksum rule. |
 | `bae_file` | file | Exactly one PDF (`application/pdf`), at most `Upload:MaxPdfSizeMb` MB. |
 
 There is **no `user_id` part** and none is read: the owner is always the user of the validated token.
@@ -676,14 +676,14 @@ There is **no `user_id` part** and none is read: the owner is always the user of
 **Processing rules:**
 
 1. Same evaluation order as §4 (token → scope → active allowlisted user); failures give the same `401`/`403` as the `GET` and store nothing.
-2. Reject a non-multipart request (`415`); a missing, duplicated or unknown part or an invalid SIREN (`400`); an oversized file (`413`); a file that is not a real PDF (`422`: the content starts with `%PDF-` and the declared type is `application/pdf`; the file extension and the client MIME type are never trusted alone).
+2. Reject a non-multipart request (`415`); a missing, duplicated or unknown part or an invalid GK number (`400`); an oversized file (`413`); a file that is not a real PDF (`422`: the content starts with `%PDF-` and the declared type is `application/pdf`; the file extension and the client MIME type are never trusted alone).
 3. Store the PDF in SharePoint through `IBaeDocumentStore` and obtain its permanent HTTPS URL (OPEN-06).
-4. Insert one `dbo.Demand` row: `UserId` = the matched user, `SirenNumber` = the nine digits, `BaeLink` = that URL, `StatusId` = the status whose code is `pending`. If the insert fails after the upload, remove the stored document on a best-effort basis and return `5xx`.
-5. Respond `201 Created` (DEC-10) with the created demand as JSON, shaped like a `demands[]` item of §5.1 (`demand_id`, `siren_number` formatted `XXX-XXX-XXX`, `bae_link`, `status: "pending"`). No `Location` header (no single-demand route exists).
+4. Insert one `dbo.Demand` row: `UserId` = the matched user, `GKNumber` = the submitted GK number, `BaeLink` = that URL, `StatusId` = the status whose code is `pending`. If the insert fails after the upload, remove the stored document on a best-effort basis and return `5xx`.
+5. Respond `201 Created` (DEC-10) with the created demand as JSON, shaped like a `demands[]` item of §5.1 (`demand_id`, `gk_number`, `bae_link`, `status: "pending"`). No `Location` header (no single-demand route exists).
 6. **Read-after-write:** the row is committed before `201` is sent, so the next `GET /api/v1/demands` already contains the demand.
-7. **Duplicates allowed (INT-09):** the same SIREN or document may be submitted again; each call creates a new demand. The operation is not idempotent and the frontend never retries it automatically.
+7. **Duplicates allowed (INT-09):** the same GK number or document may be submitted again; each call creates a new demand. The operation is not idempotent and the frontend never retries it automatically.
 8. After the commit the backend publishes `demandUpdated` to the owner (§7.2).
-9. Never log the file name, file content, SIREN or document URL.
+9. Never log the file name, file content, GK number or document URL.
 10. Request-size limits (Kestrel, App Service, `FormOptions.MultipartBodyLengthLimit`) MUST be aligned with `Upload:MaxPdfSizeMb` plus multipart overhead, so that an oversized file yields `413` and not a transport error.
 
 **Status codes:** `201`, `400`, `401`, `403`, `413`, `415`, `422`, `500`, `503`; error bodies per §5.2.
@@ -698,7 +698,7 @@ The SQL database project location is required. The backend follows the Clean Arc
 
 ```text
 src/
-  Domain/            Users/ApplicationUser, Demands/Demand, Demands/SirenNumber
+  Domain/            Users/ApplicationUser, Demands/Demand, Demands/GKNumber
   Application/       Abstractions/ (IUserRepository, IDemandRepository, IBaeLinkResolver)
                      Demands/ (DemandService, DemandDto, UserDemandsDto)
                      Common/Exceptions/ (ForbiddenException, NotFoundException)
@@ -730,28 +730,28 @@ Keep token validation separate from business query logic. Avoid introducing unre
 | AT-06 | Valid scoped token, `oid` not in `sec.User` | GET | `403` |
 | AT-07 | Valid scoped token, matching `sec.User.IsActive = 0` | GET | `403` |
 | AT-08 | Valid scoped token, active row, no demands | GET | `200`, correct `user_id` / `user_name`, `demands: []` |
-| AT-09 | Valid scoped token, active row, multiple demands | GET | `200`; correct snake_case JSON, integer `demand_id`, formatted SIREN, HTTPS PDF link, allowed status code |
+| AT-09 | Valid scoped token, active row, multiple demands | GET | `200`; correct snake_case JSON, integer `demand_id`, GK number, HTTPS PDF link, allowed status code |
 | AT-10 | Two authorized users with separate demands | Each GET | Each user receives only their own records; no cross-user leakage |
 | AT-11 | Attacker sends `user_id` query/header matching another user | GET | Ignored for filtering; identity always from validated token |
 | AT-12 | SQL database is unavailable | GET | `5xx`, sanitized response, logged server fault |
 | AT-13 | Browser preflight from approved Vite/SWA origin | OPTIONS | Allowed CORS origin, methods and requested headers |
 | AT-14 | Browser preflight from unapproved origin | OPTIONS | No permissive CORS authorization |
-| AT-15 | Invalid SQL foreign key or invalid status/SIREN/link value | INSERT in test DB | Constraint rejection |
-| AT-16 | Same company SIREN on distinct demands | INSERT | Allowed; no uniqueness on `Demand.SirenNumber` |
+| AT-15 | Invalid SQL foreign key or invalid status/GK number/link value | INSERT in test DB | Constraint rejection |
+| AT-16 | Same GK number on distinct demands | INSERT | Allowed; no uniqueness on `Demand.GKNumber` |
 | AT-17 | SQL project republished with existing records | `SqlPackage /Action:Publish` | No unintended records deleted; idempotent seeds |
 | AT-18 | Unauthorized user requests the negotiation route | POST | Same `401`/`403` policy; **not an S1 test until the route is implemented** |
 | AT-19 | Valid scoped token, active user, a stored `BaeLink` that is not an absolute HTTPS URL | GET | `5xx`, sanitized body; the stored value is not disclosed |
 | AT-20 | Valid access token without an `oid` claim | GET | `401` |
 | AT-21 | Any `401`, `403` or `5xx` from an application route | GET | `application/problem+json` body with `title`, `status`, `traceId`; no internal detail; `X-Correlation-Id` header present |
 | AT-22 | `GET /health` without a token | GET | `200` `{"status":"ok"}`; `503` `{"status":"unavailable"}` when SQL is unreachable |
-| AT-23 | **(post-Sprint 1)** Active user, valid `siren_number` and PDF `bae_file` | POST `/api/v1/demands` | `201`; body is the demand with `status: pending` and formatted SIREN; the next GET lists it first; `bae_link` is HTTPS |
-| AT-24 | **(post-Sprint 1)** `siren_number` not exactly nine digits (letters, separators, too short) | POST `/api/v1/demands` | `400` problem+json with `errors.siren_number`; nothing stored |
+| AT-23 | **(post-Sprint 1)** Active user, valid `gk_number` and PDF `bae_file` | POST `/api/v1/demands` | `201`; body is the demand with `status: pending` and the GK number; the next GET lists it first; `bae_link` is HTTPS |
+| AT-24 | **(post-Sprint 1)** `gk_number` not matching `GK######-#########` (wrong prefix, letters, missing hyphen, too short) | POST `/api/v1/demands` | `400` problem+json with `errors.gk_number`; nothing stored |
 | AT-25 | **(post-Sprint 1)** Missing or duplicated `bae_file`, or an extra part such as `user_id` | POST `/api/v1/demands` | `400`; nothing stored |
 | AT-26 | **(post-Sprint 1)** File that is not a PDF (wrong magic bytes or declared type) | POST `/api/v1/demands` | `422`; nothing stored |
 | AT-27 | **(post-Sprint 1)** PDF larger than `Upload:MaxPdfSizeMb` | POST `/api/v1/demands` | `413`; nothing stored |
 | AT-28 | **(post-Sprint 1)** Body is not `multipart/form-data` | POST `/api/v1/demands` | `415` |
 | AT-29 | **(post-Sprint 1)** No token, missing scope, unknown or inactive user | POST `/api/v1/demands` | Same `401`/`403` policy as GET; nothing stored |
-| AT-30 | **(post-Sprint 1)** Same SIREN submitted twice | POST `/api/v1/demands` | Both `201`; two distinct demands |
+| AT-30 | **(post-Sprint 1)** Same GK number submitted twice | POST `/api/v1/demands` | Both `201`; two distinct demands |
 | AT-31 | **(post-Sprint 1)** Active user, valid token | POST `/api/v1/notifications/negotiate` | `200` `{url, accessToken}`; SignalR `userId` = `oid` |
 | AT-32 | **(post-Sprint 1)** Preflight from an approved origin asking for `Authorization`, `X-Requested-With`, `X-SignalR-User-Agent` | OPTIONS negotiate | Allowed; no `Access-Control-Allow-Credentials`; unapproved origin gets no CORS grant |
 

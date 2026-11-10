@@ -177,7 +177,7 @@ app.UseExceptionHandler();
 Rules:
 - Never return `exception.Message` for unexpected (500) errors. Log details, return a generic title.
 - Never log secrets, tokens, or full connection strings.
-- Validate input at the boundary (value objects such as `SirenNumber` guard their own invariants).
+- Validate input at the boundary (value objects such as `GKNumber` guard their own invariants).
 
 ## Data Access Patterns (Dapper)
 
@@ -202,7 +202,7 @@ internal sealed class DemandRepository(ISqlConnectionFactory connectionFactory) 
     public async Task<IReadOnlyList<Demand>> ListByUserAsync(int userId, CancellationToken cancellationToken)
     {
         const string sql = """
-            SELECT d.DemandId, d.SirenNumber, d.BaeLink, s.Code AS StatusCode
+            SELECT d.DemandId, d.GKNumber, d.BaeLink, s.Code AS StatusCode
             FROM dbo.Demand AS d
             INNER JOIN ref.Status AS s ON s.StatusId = d.StatusId
             WHERE d.UserId = @UserId
@@ -275,11 +275,11 @@ public class DemandServiceTests
 
     [Theory]
     [InlineData("")]
-    [InlineData("12345678")]
-    [InlineData("12345678A")]
-    public void SirenNumber_ShouldReject_InvalidValues(string value)
+    [InlineData("260902-144743112")]
+    [InlineData("GK260902-14474311A")]
+    public void GKNumber_ShouldReject_InvalidValues(string value)
     {
-        Action action = () => SirenNumber.Parse(value);
+        Action action = () => GKNumber.Parse(value);
 
         action.Should().Throw<ArgumentException>();
     }
