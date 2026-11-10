@@ -53,7 +53,7 @@ dotnet run --project src/WebApi --launch-profile https
 | GitHub Copilot | `.github/copilot-instructions.md` |
 | Local LLM tools | `prompts/` |
 
-`.claude/agents/ef-core-engineer.md` and `.claude/skills/ef-core-patterns` are generic leftovers and do not apply to this repository.
+Dapper guidance lives in `.claude/skills/dotnet-backend-patterns` and the `dapper-engineer` agent (`.claude/agents/dapper-engineer.md`).
 
 ## License
 

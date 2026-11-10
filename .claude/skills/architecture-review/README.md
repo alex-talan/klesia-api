@@ -17,9 +17,9 @@ Use this skill to review Clean Architecture boundaries, dependency direction, an
 
 | Layer | Owns | Must Avoid |
 |------|------|------------|
-| Domain | Business rules and core model | EF Core, HTTP, Azure SDKs |
+| Domain | Business rules and core model | Dapper, SQL, HTTP, Azure SDKs |
 | Application | Use cases, DTOs, interfaces | Vendor or persistence details |
-| Infrastructure | EF Core, SDKs, implementations | Core business rules |
+| Infrastructure | Dapper repositories, SQL, SDKs, implementations | Core business rules |
 | WebApi | Controllers, middleware, composition root | Domain logic, persistence logic |
 
 ## Review Checklist

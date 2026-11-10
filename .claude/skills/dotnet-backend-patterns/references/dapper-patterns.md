@@ -1,73 +1,61 @@
 # Dapper Patterns and Best Practices
 
-Advanced patterns for high-performance data access with Dapper in .NET.
+Advanced patterns for data access with Dapper in .NET.
+
+> The examples use generic names (`Products`, `Orders`). In Klesia, tables live in `database/Klesia.Database` (schemas `dbo`, `ref`, `sec`; keys named `{Table}Id`), so qualify names accordingly (for example `dbo.Demand`, `[sec].[User]`). See `assets/repository-template.cs` for a Klesia-shaped repository.
 
 ## Why Dapper?
 
-| Aspect           | Dapper                         | EF Core                |
-| ---------------- | ------------------------------ | ---------------------- |
-| Performance      | ~10x faster for simple queries | Good with optimization |
-| Control          | Full SQL control               | Abstracted             |
-| Learning curve   | Low (just SQL)                 | Higher                 |
-| Complex mappings | Manual                         | Automatic              |
-| Change tracking  | None                           | Built-in               |
-| Migrations       | External tools                 | Built-in               |
+Klesia uses Dapper over `Microsoft.Data.SqlClient`. There is no ORM: the SQL database project (`database/Klesia.Database`) is the single owner of the schema, so there are no EF migrations, no `DbContext` and no change tracking.
 
-**Use Dapper when:**
+Dapper gives you:
 
-- Performance is critical (hot paths)
-- You need complex SQL (CTEs, window functions)
-- Read-heavy workloads
-- Legacy database schemas
+- Full control over the SQL (CTEs, window functions, hints)
+- Predictable performance and a small abstraction surface
+- Explicit mapping between rows and DTOs/domain types
+- Easy parameterization (`@Name`) to prevent SQL injection
 
-**Use EF Core when:**
+You are responsible for:
 
-- Rich domain models with relationships
-- Need change tracking
-- Want LINQ-to-SQL translation
-- Complex object graphs
+- Writing and reviewing the SQL by hand
+- Mapping joins and multiple result sets explicitly
+- Keeping column names and types aligned with the database project
+- Managing transactions explicitly
 
 ## Connection Management
 
 ### 1. Proper Connection Handling
 
 ```csharp
-// Register connection factory
-services.AddScoped<IDbConnection>(sp =>
+// Klesia convention: a factory over typed, validated options returns a SqlConnection.
+public interface ISqlConnectionFactory
 {
-    var connectionString = sp.GetRequiredService<IConfiguration>()
-        .GetConnectionString("Default");
-    return new SqlConnection(connectionString);
-});
-
-// Or use a factory for more control
-public interface IDbConnectionFactory
-{
-    IDbConnection CreateConnection();
+    SqlConnection CreateConnection();
 }
 
-public class SqlConnectionFactory : IDbConnectionFactory
+internal sealed class SqlConnectionFactory(IOptions<SqlServerOptions> options) : ISqlConnectionFactory
 {
-    private readonly string _connectionString;
-
-    public SqlConnectionFactory(IConfiguration configuration)
-    {
-        _connectionString = configuration.GetConnectionString("Default")
-            ?? throw new InvalidOperationException("Connection string not found");
-    }
-
-    public IDbConnection CreateConnection() => new SqlConnection(_connectionString);
+    public SqlConnection CreateConnection() => new(options.Value.ConnectionString);
 }
+
+// Registration (Infrastructure/DependencyInjection.cs)
+services.AddOptions<SqlServerOptions>()
+    .Bind(configuration.GetSection(SqlServerOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+services.AddSingleton<ISqlConnectionFactory, SqlConnectionFactory>();
 ```
+
+The connection string comes from configuration (user secrets locally, Key Vault / App Configuration in Azure) and uses `Authentication=Active Directory Default`. It is never hardcoded.
 
 ### 2. Connection Lifecycle
 
 ```csharp
 public class ProductRepository
 {
-    private readonly IDbConnectionFactory _factory;
+    private readonly ISqlConnectionFactory _factory;
 
-    public ProductRepository(IDbConnectionFactory factory)
+    public ProductRepository(ISqlConnectionFactory factory)
     {
         _factory = factory;
     }
@@ -79,7 +67,7 @@ public class ProductRepository
 
         return await connection.QueryFirstOrDefaultAsync<Product>(
             new CommandDefinition(
-                "SELECT * FROM Products WHERE Id = @Id",
+                "SELECT Id, Name, Sku, Price FROM Products WHERE Id = @Id",
                 new { Id = id },
                 cancellationToken: ct));
     }
@@ -93,7 +81,7 @@ public class ProductRepository
 ```csharp
 // SELECT single
 var product = await connection.QueryFirstOrDefaultAsync<Product>(
-    "SELECT * FROM Products WHERE Id = @Id",
+    "SELECT Id, Name, Sku, Price FROM Products WHERE Id = @Id",
     new { Id = id });
 
 // SELECT multiple
@@ -476,11 +464,11 @@ await foreach (var product in products)
 ```csharp
 public abstract class DapperRepositoryBase<T> where T : class
 {
-    protected readonly IDbConnectionFactory ConnectionFactory;
+    protected readonly ISqlConnectionFactory ConnectionFactory;
     protected readonly ILogger Logger;
     protected abstract string TableName { get; }
 
-    protected DapperRepositoryBase(IDbConnectionFactory factory, ILogger logger)
+    protected DapperRepositoryBase(ISqlConnectionFactory factory, ILogger logger)
     {
         ConnectionFactory = factory;
         Logger = logger;

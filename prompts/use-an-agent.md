@@ -6,7 +6,7 @@ Use one when the task has a clear specialization, for example:
 
 - `dotnet-engineer` for normal ASP.NET Core implementation work
 - `csharp-architect` for structure and boundary decisions
-- `ef-core-engineer` for persistence and migrations
+- `dapper-engineer` for Dapper repositories and SQL access
 - `azure-engineer` for Azure integrations
 - `security-engineer` for hardening and auth
 - `test-automator` for testing work
@@ -16,6 +16,6 @@ Use one when the task has a clear specialization, for example:
 ## Example Prompt
 
 ```text
-Read AGENTS.md and .claude/agents/ef-core-engineer.md.
-Follow those instructions while reviewing and updating the persistence layer.
+Read AGENTS.md and .claude/agents/dapper-engineer.md.
+Follow those instructions while reviewing and updating the Dapper persistence layer.
 ```

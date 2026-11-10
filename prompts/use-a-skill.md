@@ -8,7 +8,7 @@ Use a skill when you want a checklist, review rubric, or implementation pattern 
 - `architecture-review`
 - `design-patterns`
 - `api-contract-review`
-- `ef-core-patterns`
+- `dotnet-backend-patterns`
 - `azure-integration`
 - `logging-patterns`
 - `testing-patterns`

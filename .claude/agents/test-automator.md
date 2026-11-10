@@ -114,7 +114,7 @@ Excellence checklist:
 
 Integration with other agents:
 - Work with `dotnet-engineer` on feature verification
-- Partner with `ef-core-engineer` on persistence tests
+- Partner with `dapper-engineer` on persistence tests
 - Support `code-reviewer` on test quality gaps
 - Coordinate with `security-engineer` on negative-path security coverage
 

@@ -21,7 +21,7 @@ Audit ASP.NET Core Web API design for correctness, consistency, and compatibilit
 |-------|---------|--------|
 | Wrong HTTP verb | `POST` used for idempotent retrieval or update | Confusing semantics, caching issues, harder clients |
 | Missing versioning | `/api/users` instead of `/api/v1/users` | Breaking changes affect all consumers |
-| Entity leak | EF Core entity returned directly from controller | Exposes internals, persistence shape, concurrency fields |
+| Entity leak | Domain entity or SQL row type returned directly from controller | Exposes internals, persistence shape, concurrency fields |
 | `200 OK` with error payload | Error body returned with HTTP 200 | Breaks client error handling |
 | Inconsistent route naming | `/getUsers` vs `/users` | Makes APIs harder to learn and maintain |
 
@@ -147,11 +147,12 @@ public sealed class LegacyUsersController : ControllerBase
 ### DTO vs Entity
 
 ```csharp
-// BAD: EF Core entity returned directly
+// BAD: Persistence row (or domain entity) returned directly, with SQL in the controller
 [HttpGet("{id:guid}")]
-public async Task<ActionResult<User>> GetAsync(Guid id, CancellationToken cancellationToken)
+public async Task<ActionResult<UserRow>> GetAsync(Guid id, CancellationToken cancellationToken)
 {
-    User? user = await dbContext.Users.FindAsync([id], cancellationToken);
+    UserRow? user = await connection.QuerySingleOrDefaultAsync<UserRow>(
+        new CommandDefinition("SELECT * FROM sec.[User] WHERE Id = @Id", new { Id = id }, cancellationToken: cancellationToken));
     return user is null ? NotFound() : Ok(user);
 }
 

@@ -1,523 +1,175 @@
-// Repository Implementation Template for .NET 8+
-// Demonstrates both Dapper (performance) and EF Core (convenience) patterns
+// Repository template for Klesia (net10.0, Dapper over Microsoft.Data.SqlClient).
+// Illustrative only: the real schema is owned by database/Klesia.Database.
+// Each region below belongs in a different project; the paths are in the region names.
 
 using System.Data;
 using Dapper;
 using Microsoft.Data.SqlClient;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
-namespace YourNamespace.Infrastructure.Data;
+namespace Klesia.Templates;
 
-#region Interfaces
+#region Domain/Demands/Demand.cs
 
-public interface IProductRepository
+public sealed record Demand(int DemandId, string SirenNumber, string BaeLink, string StatusCode);
+
+#endregion
+
+#region Application/Abstractions/IDemandRepository.cs
+
+public interface IDemandRepository
 {
-    Task<Product?> GetByIdAsync(string id, CancellationToken ct = default);
-    Task<Product?> GetBySkuAsync(string sku, CancellationToken ct = default);
-    Task<(IReadOnlyList<Product> Items, int TotalCount)> SearchAsync(ProductSearchRequest request, CancellationToken ct = default);
-    Task<Product> CreateAsync(Product product, CancellationToken ct = default);
-    Task<Product> UpdateAsync(Product product, CancellationToken ct = default);
-    Task DeleteAsync(string id, CancellationToken ct = default);
-    Task<IReadOnlyList<Product>> GetByIdsAsync(IEnumerable<string> ids, CancellationToken ct = default);
+    Task<Demand?> FindByIdAsync(int demandId, CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<Demand>> ListByUserAsync(int userId, CancellationToken cancellationToken);
+
+    Task<int> CreateAsync(int userId, string sirenNumber, string baeLink, CancellationToken cancellationToken);
+
+    Task<bool> UpdateStatusAsync(int demandId, string statusCode, CancellationToken cancellationToken);
 }
 
 #endregion
 
-#region Dapper Implementation (High Performance)
+#region Infrastructure/Persistence/ISqlConnectionFactory.cs
 
-public class DapperProductRepository : IProductRepository
+public interface ISqlConnectionFactory
 {
-    private readonly IDbConnection _connection;
-    private readonly ILogger<DapperProductRepository> _logger;
+    SqlConnection CreateConnection();
+}
 
-    public DapperProductRepository(
-        IDbConnection connection,
-        ILogger<DapperProductRepository> logger)
-    {
-        _connection = connection;
-        _logger = logger;
-    }
+internal sealed class SqlConnectionFactory(IOptions<SqlServerOptions> options) : ISqlConnectionFactory
+{
+    public SqlConnection CreateConnection() => new(options.Value.ConnectionString);
+}
 
-    public async Task<Product?> GetByIdAsync(string id, CancellationToken ct = default)
-    {
-        const string sql = """
-            SELECT Id, Name, Sku, Price, CategoryId, Stock, CreatedAt, UpdatedAt
-            FROM Products
-            WHERE Id = @Id AND IsDeleted = 0
-            """;
+public sealed class SqlServerOptions
+{
+    public const string SectionName = "SqlServer";
 
-        return await _connection.QueryFirstOrDefaultAsync<Product>(
-            new CommandDefinition(sql, new { Id = id }, cancellationToken: ct));
-    }
+    public string ConnectionString { get; set; } = string.Empty;
+}
 
-    public async Task<Product?> GetBySkuAsync(string sku, CancellationToken ct = default)
+#endregion
+
+#region Infrastructure/Persistence/Repositories/DemandRepository.cs
+
+internal sealed class DemandRepository(ISqlConnectionFactory connectionFactory) : IDemandRepository
+{
+    public async Task<Demand?> FindByIdAsync(int demandId, CancellationToken cancellationToken)
     {
         const string sql = """
-            SELECT Id, Name, Sku, Price, CategoryId, Stock, CreatedAt, UpdatedAt
-            FROM Products
-            WHERE Sku = @Sku AND IsDeleted = 0
+            SELECT d.DemandId, d.SirenNumber, d.BaeLink, s.Code AS StatusCode
+            FROM dbo.Demand AS d
+            INNER JOIN ref.Status AS s ON s.StatusId = d.StatusId
+            WHERE d.DemandId = @DemandId
             """;
 
-        return await _connection.QueryFirstOrDefaultAsync<Product>(
-            new CommandDefinition(sql, new { Sku = sku }, cancellationToken: ct));
+        await using SqlConnection connection = connectionFactory.CreateConnection();
+        return await connection.QuerySingleOrDefaultAsync<Demand>(
+            new CommandDefinition(sql, new { DemandId = demandId }, cancellationToken: cancellationToken));
     }
 
-    public async Task<(IReadOnlyList<Product> Items, int TotalCount)> SearchAsync(
-        ProductSearchRequest request, 
-        CancellationToken ct = default)
+    public async Task<IReadOnlyList<Demand>> ListByUserAsync(int userId, CancellationToken cancellationToken)
     {
-        var whereClauses = new List<string> { "IsDeleted = 0" };
-        var parameters = new DynamicParameters();
+        const string sql = """
+            SELECT d.DemandId, d.SirenNumber, d.BaeLink, s.Code AS StatusCode
+            FROM dbo.Demand AS d
+            INNER JOIN ref.Status AS s ON s.StatusId = d.StatusId
+            WHERE d.UserId = @UserId
+            ORDER BY d.DemandId DESC
+            """;
 
-        // Build dynamic WHERE clause
-        if (!string.IsNullOrWhiteSpace(request.SearchTerm))
+        await using SqlConnection connection = connectionFactory.CreateConnection();
+        IEnumerable<Demand> rows = await connection.QueryAsync<Demand>(
+            new CommandDefinition(sql, new { UserId = userId }, cancellationToken: cancellationToken));
+
+        return rows.AsList();
+    }
+
+    public async Task<int> CreateAsync(
+        int userId,
+        string sirenNumber,
+        string baeLink,
+        CancellationToken cancellationToken)
+    {
+        // The status id is resolved in SQL from its stable code, never hardcoded in C#.
+        const string sql = """
+            INSERT INTO dbo.Demand (UserId, SirenNumber, BaeLink, StatusId)
+            OUTPUT INSERTED.DemandId
+            SELECT @UserId, @SirenNumber, @BaeLink, s.StatusId
+            FROM ref.Status AS s
+            WHERE s.Code = N'pending'
+            """;
+
+        await using SqlConnection connection = connectionFactory.CreateConnection();
+        try
         {
-            whereClauses.Add("(Name LIKE @SearchTerm OR Sku LIKE @SearchTerm)");
-            parameters.Add("SearchTerm", $"%{request.SearchTerm}%");
+            return await connection.QuerySingleAsync<int>(
+                new CommandDefinition(
+                    sql,
+                    new { UserId = userId, SirenNumber = sirenNumber, BaeLink = baeLink },
+                    cancellationToken: cancellationToken));
         }
-
-        if (request.CategoryId.HasValue)
+        catch (SqlException ex) when (ex.Number is 2627 or 2601 or 547 or 515)
         {
-            whereClauses.Add("CategoryId = @CategoryId");
-            parameters.Add("CategoryId", request.CategoryId.Value);
+            // Constraint violation: translate it so Application never sees SqlException.
+            throw new InvalidOperationException("The demand violates a database constraint.", ex);
         }
-
-        if (request.MinPrice.HasValue)
-        {
-            whereClauses.Add("Price >= @MinPrice");
-            parameters.Add("MinPrice", request.MinPrice.Value);
-        }
-
-        if (request.MaxPrice.HasValue)
-        {
-            whereClauses.Add("Price <= @MaxPrice");
-            parameters.Add("MaxPrice", request.MaxPrice.Value);
-        }
-
-        var whereClause = string.Join(" AND ", whereClauses);
-        var page = request.Page ?? 1;
-        var pageSize = request.PageSize ?? 50;
-        var offset = (page - 1) * pageSize;
-
-        parameters.Add("Offset", offset);
-        parameters.Add("PageSize", pageSize);
-
-        // Use multi-query for count + data in single roundtrip
-        var sql = $"""
-            -- Count query
-            SELECT COUNT(*) FROM Products WHERE {whereClause};
-            
-            -- Data query with pagination
-            SELECT Id, Name, Sku, Price, CategoryId, Stock, CreatedAt, UpdatedAt
-            FROM Products
-            WHERE {whereClause}
-            ORDER BY Name
-            OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;
-            """;
-
-        using var multi = await _connection.QueryMultipleAsync(
-            new CommandDefinition(sql, parameters, cancellationToken: ct));
-
-        var totalCount = await multi.ReadSingleAsync<int>();
-        var items = (await multi.ReadAsync<Product>()).ToList();
-
-        return (items, totalCount);
     }
 
-    public async Task<Product> CreateAsync(Product product, CancellationToken ct = default)
+    public async Task<bool> UpdateStatusAsync(int demandId, string statusCode, CancellationToken cancellationToken)
     {
         const string sql = """
-            INSERT INTO Products (Id, Name, Sku, Price, CategoryId, Stock, CreatedAt, IsDeleted)
-            VALUES (@Id, @Name, @Sku, @Price, @CategoryId, @Stock, @CreatedAt, 0);
-            
-            SELECT Id, Name, Sku, Price, CategoryId, Stock, CreatedAt, UpdatedAt
-            FROM Products WHERE Id = @Id;
+            UPDATE d
+            SET d.StatusId = s.StatusId
+            FROM dbo.Demand AS d
+            INNER JOIN ref.Status AS s ON s.Code = @StatusCode
+            WHERE d.DemandId = @DemandId
             """;
 
-        return await _connection.QuerySingleAsync<Product>(
-            new CommandDefinition(sql, product, cancellationToken: ct));
-    }
+        await using SqlConnection connection = connectionFactory.CreateConnection();
+        int affected = await connection.ExecuteAsync(
+            new CommandDefinition(
+                sql,
+                new { DemandId = demandId, StatusCode = statusCode },
+                cancellationToken: cancellationToken));
 
-    public async Task<Product> UpdateAsync(Product product, CancellationToken ct = default)
-    {
-        const string sql = """
-            UPDATE Products
-            SET Name = @Name,
-                Sku = @Sku,
-                Price = @Price,
-                CategoryId = @CategoryId,
-                Stock = @Stock,
-                UpdatedAt = @UpdatedAt
-            WHERE Id = @Id AND IsDeleted = 0;
-            
-            SELECT Id, Name, Sku, Price, CategoryId, Stock, CreatedAt, UpdatedAt
-            FROM Products WHERE Id = @Id;
-            """;
-
-        return await _connection.QuerySingleAsync<Product>(
-            new CommandDefinition(sql, product, cancellationToken: ct));
-    }
-
-    public async Task DeleteAsync(string id, CancellationToken ct = default)
-    {
-        const string sql = """
-            UPDATE Products
-            SET IsDeleted = 1, UpdatedAt = @UpdatedAt
-            WHERE Id = @Id
-            """;
-
-        await _connection.ExecuteAsync(
-            new CommandDefinition(sql, new { Id = id, UpdatedAt = DateTime.UtcNow }, cancellationToken: ct));
-    }
-
-    public async Task<IReadOnlyList<Product>> GetByIdsAsync(
-        IEnumerable<string> ids, 
-        CancellationToken ct = default)
-    {
-        var idList = ids.ToList();
-        if (idList.Count == 0)
-            return Array.Empty<Product>();
-
-        const string sql = """
-            SELECT Id, Name, Sku, Price, CategoryId, Stock, CreatedAt, UpdatedAt
-            FROM Products
-            WHERE Id IN @Ids AND IsDeleted = 0
-            """;
-
-        var results = await _connection.QueryAsync<Product>(
-            new CommandDefinition(sql, new { Ids = idList }, cancellationToken: ct));
-
-        return results.ToList();
+        return affected > 0;
     }
 }
 
 #endregion
 
-#region EF Core Implementation (Rich Domain Models)
+#region Multi-statement transaction (only when several statements must succeed together)
 
-public class EfCoreProductRepository : IProductRepository
+internal static class TransactionExample
 {
-    private readonly AppDbContext _context;
-    private readonly ILogger<EfCoreProductRepository> _logger;
-
-    public EfCoreProductRepository(
-        AppDbContext context,
-        ILogger<EfCoreProductRepository> logger)
+    public static async Task ExecuteAsync(
+        ISqlConnectionFactory connectionFactory,
+        CancellationToken cancellationToken)
     {
-        _context = context;
-        _logger = logger;
-    }
+        await using SqlConnection connection = connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        await using SqlTransaction transaction = (SqlTransaction)await connection.BeginTransactionAsync(cancellationToken);
 
-    public async Task<Product?> GetByIdAsync(string id, CancellationToken ct = default)
-    {
-        return await _context.Products
-            .AsNoTracking()
-            .FirstOrDefaultAsync(p => p.Id == id, ct);
-    }
-
-    public async Task<Product?> GetBySkuAsync(string sku, CancellationToken ct = default)
-    {
-        return await _context.Products
-            .AsNoTracking()
-            .FirstOrDefaultAsync(p => p.Sku == sku, ct);
-    }
-
-    public async Task<(IReadOnlyList<Product> Items, int TotalCount)> SearchAsync(
-        ProductSearchRequest request, 
-        CancellationToken ct = default)
-    {
-        var query = _context.Products.AsNoTracking();
-
-        // Apply filters
-        if (!string.IsNullOrWhiteSpace(request.SearchTerm))
+        try
         {
-            var term = request.SearchTerm.ToLower();
-            query = query.Where(p => 
-                p.Name.ToLower().Contains(term) || 
-                p.Sku.ToLower().Contains(term));
+            await connection.ExecuteAsync(new CommandDefinition(
+                "UPDATE dbo.Demand SET StatusId = @StatusId WHERE DemandId = @DemandId",
+                new { StatusId = 2, DemandId = 1 },
+                transaction,
+                cancellationToken: cancellationToken));
+
+            // ... further statements sharing the same transaction ...
+
+            await transaction.CommitAsync(cancellationToken);
         }
-
-        if (request.CategoryId.HasValue)
-            query = query.Where(p => p.CategoryId == request.CategoryId.Value);
-
-        if (request.MinPrice.HasValue)
-            query = query.Where(p => p.Price >= request.MinPrice.Value);
-
-        if (request.MaxPrice.HasValue)
-            query = query.Where(p => p.Price <= request.MaxPrice.Value);
-
-        // Get count before pagination
-        var totalCount = await query.CountAsync(ct);
-
-        // Apply pagination
-        var page = request.Page ?? 1;
-        var pageSize = request.PageSize ?? 50;
-
-        var items = await query
-            .OrderBy(p => p.Name)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .ToListAsync(ct);
-
-        return (items, totalCount);
-    }
-
-    public async Task<Product> CreateAsync(Product product, CancellationToken ct = default)
-    {
-        _context.Products.Add(product);
-        await _context.SaveChangesAsync(ct);
-        return product;
-    }
-
-    public async Task<Product> UpdateAsync(Product product, CancellationToken ct = default)
-    {
-        _context.Products.Update(product);
-        await _context.SaveChangesAsync(ct);
-        return product;
-    }
-
-    public async Task DeleteAsync(string id, CancellationToken ct = default)
-    {
-        var product = await _context.Products.FindAsync(new object[] { id }, ct);
-        if (product != null)
+        catch
         {
-            product.IsDeleted = true;
-            product.UpdatedAt = DateTime.UtcNow;
-            await _context.SaveChangesAsync(ct);
+            await transaction.RollbackAsync(cancellationToken);
+            throw;
         }
     }
-
-    public async Task<IReadOnlyList<Product>> GetByIdsAsync(
-        IEnumerable<string> ids, 
-        CancellationToken ct = default)
-    {
-        var idList = ids.ToList();
-        if (idList.Count == 0)
-            return Array.Empty<Product>();
-
-        return await _context.Products
-            .AsNoTracking()
-            .Where(p => idList.Contains(p.Id))
-            .ToListAsync(ct);
-    }
-}
-
-#endregion
-
-#region DbContext Configuration
-
-public class AppDbContext : DbContext
-{
-    public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
-
-    public DbSet<Product> Products => Set<Product>();
-    public DbSet<Category> Categories => Set<Category>();
-    public DbSet<Order> Orders => Set<Order>();
-    public DbSet<OrderItem> OrderItems => Set<OrderItem>();
-
-    protected override void OnModelCreating(ModelBuilder modelBuilder)
-    {
-        // Apply all configurations from assembly
-        modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
-
-        // Global query filter for soft delete
-        modelBuilder.Entity<Product>().HasQueryFilter(p => !p.IsDeleted);
-    }
-}
-
-public class ProductConfiguration : IEntityTypeConfiguration<Product>
-{
-    public void Configure(EntityTypeBuilder<Product> builder)
-    {
-        builder.ToTable("Products");
-
-        builder.HasKey(p => p.Id);
-        builder.Property(p => p.Id).HasMaxLength(40);
-
-        builder.Property(p => p.Name)
-            .HasMaxLength(200)
-            .IsRequired();
-
-        builder.Property(p => p.Sku)
-            .HasMaxLength(50)
-            .IsRequired();
-
-        builder.Property(p => p.Price)
-            .HasPrecision(18, 2);
-
-        // Indexes
-        builder.HasIndex(p => p.Sku).IsUnique();
-        builder.HasIndex(p => p.CategoryId);
-        builder.HasIndex(p => new { p.CategoryId, p.Name });
-
-        // Relationships
-        builder.HasOne(p => p.Category)
-            .WithMany(c => c.Products)
-            .HasForeignKey(p => p.CategoryId);
-    }
-}
-
-#endregion
-
-#region Advanced Patterns
-
-/// <summary>
-/// Unit of Work pattern for coordinating multiple repositories
-/// </summary>
-public interface IUnitOfWork : IDisposable
-{
-    IProductRepository Products { get; }
-    IOrderRepository Orders { get; }
-    Task<int> SaveChangesAsync(CancellationToken ct = default);
-    Task BeginTransactionAsync(CancellationToken ct = default);
-    Task CommitAsync(CancellationToken ct = default);
-    Task RollbackAsync(CancellationToken ct = default);
-}
-
-public class UnitOfWork : IUnitOfWork
-{
-    private readonly AppDbContext _context;
-    private IDbContextTransaction? _transaction;
-
-    public IProductRepository Products { get; }
-    public IOrderRepository Orders { get; }
-
-    public UnitOfWork(
-        AppDbContext context,
-        IProductRepository products,
-        IOrderRepository orders)
-    {
-        _context = context;
-        Products = products;
-        Orders = orders;
-    }
-
-    public async Task<int> SaveChangesAsync(CancellationToken ct = default)
-        => await _context.SaveChangesAsync(ct);
-
-    public async Task BeginTransactionAsync(CancellationToken ct = default)
-    {
-        _transaction = await _context.Database.BeginTransactionAsync(ct);
-    }
-
-    public async Task CommitAsync(CancellationToken ct = default)
-    {
-        if (_transaction != null)
-        {
-            await _transaction.CommitAsync(ct);
-            await _transaction.DisposeAsync();
-            _transaction = null;
-        }
-    }
-
-    public async Task RollbackAsync(CancellationToken ct = default)
-    {
-        if (_transaction != null)
-        {
-            await _transaction.RollbackAsync(ct);
-            await _transaction.DisposeAsync();
-            _transaction = null;
-        }
-    }
-
-    public void Dispose()
-    {
-        _transaction?.Dispose();
-        _context.Dispose();
-    }
-}
-
-/// <summary>
-/// Specification pattern for complex queries
-/// </summary>
-public interface ISpecification<T>
-{
-    Expression<Func<T, bool>> Criteria { get; }
-    List<Expression<Func<T, object>>> Includes { get; }
-    List<string> IncludeStrings { get; }
-    Expression<Func<T, object>>? OrderBy { get; }
-    Expression<Func<T, object>>? OrderByDescending { get; }
-    int? Take { get; }
-    int? Skip { get; }
-}
-
-public abstract class BaseSpecification<T> : ISpecification<T>
-{
-    public Expression<Func<T, bool>> Criteria { get; private set; } = _ => true;
-    public List<Expression<Func<T, object>>> Includes { get; } = new();
-    public List<string> IncludeStrings { get; } = new();
-    public Expression<Func<T, object>>? OrderBy { get; private set; }
-    public Expression<Func<T, object>>? OrderByDescending { get; private set; }
-    public int? Take { get; private set; }
-    public int? Skip { get; private set; }
-
-    protected void AddCriteria(Expression<Func<T, bool>> criteria) => Criteria = criteria;
-    protected void AddInclude(Expression<Func<T, object>> include) => Includes.Add(include);
-    protected void AddInclude(string include) => IncludeStrings.Add(include);
-    protected void ApplyOrderBy(Expression<Func<T, object>> orderBy) => OrderBy = orderBy;
-    protected void ApplyOrderByDescending(Expression<Func<T, object>> orderBy) => OrderByDescending = orderBy;
-    protected void ApplyPaging(int skip, int take) { Skip = skip; Take = take; }
-}
-
-// Example specification
-public class ProductsByCategorySpec : BaseSpecification<Product>
-{
-    public ProductsByCategorySpec(int categoryId, int page, int pageSize)
-    {
-        AddCriteria(p => p.CategoryId == categoryId);
-        AddInclude(p => p.Category);
-        ApplyOrderBy(p => p.Name);
-        ApplyPaging((page - 1) * pageSize, pageSize);
-    }
-}
-
-#endregion
-
-#region Entity Definitions
-
-public class Product
-{
-    public string Id { get; set; } = string.Empty;
-    public string Name { get; set; } = string.Empty;
-    public string Sku { get; set; } = string.Empty;
-    public decimal Price { get; set; }
-    public int CategoryId { get; set; }
-    public int Stock { get; set; }
-    public bool IsDeleted { get; set; }
-    public DateTime CreatedAt { get; set; }
-    public DateTime? UpdatedAt { get; set; }
-
-    // Navigation
-    public Category? Category { get; set; }
-}
-
-public class Category
-{
-    public int Id { get; set; }
-    public string Name { get; set; } = string.Empty;
-    public ICollection<Product> Products { get; set; } = new List<Product>();
-}
-
-public class Order
-{
-    public int Id { get; set; }
-    public string CustomerOrderCode { get; set; } = string.Empty;
-    public decimal Total { get; set; }
-    public DateTime CreatedAt { get; set; }
-    public ICollection<OrderItem> Items { get; set; } = new List<OrderItem>();
-}
-
-public class OrderItem
-{
-    public int Id { get; set; }
-    public int OrderId { get; set; }
-    public string ProductId { get; set; } = string.Empty;
-    public int Quantity { get; set; }
-    public decimal UnitPrice { get; set; }
-
-    public Order? Order { get; set; }
-    public Product? Product { get; set; }
 }
 
 #endregion

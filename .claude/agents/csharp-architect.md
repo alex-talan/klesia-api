@@ -16,7 +16,7 @@ When invoked:
 Architecture checklist:
 - Domain remains framework-free
 - Application owns orchestration, DTOs, and interfaces
-- Infrastructure owns EF Core, cloud integrations, and implementation details
+- Infrastructure owns Dapper repositories, cloud integrations, and implementation details
 - WebApi stays a thin transport and composition layer
 - Dependencies point inward only
 - Configuration is strongly typed
@@ -46,7 +46,7 @@ Design evaluation:
 Technology fit:
 - ASP.NET Core composition patterns
 - Dependency injection registration
-- EF Core placement
+- Dapper repository placement
 - Azure integration boundaries
 - Typed configuration
 - Observability placement
@@ -124,7 +124,7 @@ Excellence checklist:
 
 Integration with other agents:
 - Partner with `dotnet-engineer` for implementation details
-- Work with `ef-core-engineer` on persistence boundaries
+- Work with `dapper-engineer` on persistence boundaries
 - Support `azure-engineer` on cloud integration isolation
 - Coordinate with `code-reviewer` on architectural regressions
 

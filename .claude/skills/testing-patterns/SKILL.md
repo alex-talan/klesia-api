@@ -10,7 +10,7 @@ Write tests that are readable, deterministic, and aligned with real application 
 ## When to Use
 - Adding unit tests for domain or application logic
 - Adding integration tests for API endpoints
-- Testing EF Core mappings and persistence behavior
+- Testing Dapper repositories, SQL queries, and constraints
 - Improving failure-path coverage
 
 ---
@@ -46,18 +46,16 @@ Write tests that are readable, deterministic, and aligned with real application 
 public async Task CreateAsync_ShouldPersistOrder_WhenRequestIsValid()
 {
     IOrderRepository repository = Substitute.For<IOrderRepository>();
-    IUnitOfWork unitOfWork = Substitute.For<IUnitOfWork>();
     IClock clock = Substitute.For<IClock>();
 
     clock.UtcNow.Returns(new DateTimeOffset(2026, 3, 21, 8, 0, 0, TimeSpan.Zero));
 
-    CreateOrderHandler sut = new(repository, unitOfWork, clock);
+    CreateOrderHandler sut = new(repository, clock);
 
     OrderResponse result = await sut.HandleAsync(new CreateOrderRequest("Acme"), CancellationToken.None);
 
     result.CustomerName.Should().Be("Acme");
     await repository.Received(1).AddAsync(Arg.Any<Order>(), CancellationToken.None);
-    await unitOfWork.Received(1).SaveChangesAsync(CancellationToken.None);
 }
 ```
 
@@ -67,7 +65,7 @@ public async Task CreateAsync_ShouldPersistOrder_WhenRequestIsValid()
 [Fact]
 public async Task CreateAsync_ShouldThrow_WhenCustomerNameIsMissing()
 {
-    CreateOrderHandler sut = new(repository, unitOfWork, clock);
+    CreateOrderHandler sut = new(repository, clock);
 
     Func<Task> action = async () => await sut.HandleAsync(new CreateOrderRequest(" "), CancellationToken.None);
 
@@ -82,8 +80,8 @@ public async Task CreateAsync_ShouldThrow_WhenCustomerNameIsMissing()
 Use integration tests for:
 - HTTP routing and serialization
 - Middleware and authentication behavior
-- EF Core query and mapping behavior
-- Database migration and persistence flows
+- Dapper query and row-mapping behavior (against a real SQL Server instance)
+- Constraints and persistence flows defined by the SQL database project
 
 ```csharp
 [Fact]
@@ -144,6 +142,6 @@ Suggested commands:
 
 ```bash
 rg "\\[Fact\\]|\\[Theory\\]" tests
-rg "WebApplicationFactory|Sqlite|Testcontainers|FluentAssertions|NSubstitute" tests
+rg "WebApplicationFactory|SqlConnection|Testcontainers|FluentAssertions|NSubstitute" tests
 rg "throw new|Results\\.Problem|NotFound|BadRequest" src
 ```

@@ -103,7 +103,7 @@ Use when repository or query logic starts accumulating many optional filters or 
 
 ### Generic Repository by Default
 - Adds indirection without meaning
-- Usually duplicates `DbContext`
+- Hides the SQL; Dapper repositories should keep their queries explicit and specific
 
 ### Abstract Factory with One Implementation
 - Premature generalization

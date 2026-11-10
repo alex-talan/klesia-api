@@ -15,7 +15,7 @@ When invoked:
 
 DevOps checklist:
 - `dotnet restore`, `dotnet build`, and `dotnet test` are baseline gates
-- EF Core migration flow is automated and documented
+- SQL database project build and deployment is automated and documented
 - Environment-specific configuration is externalized
 - Health checks and readiness are deployment-aware
 - Logs and metrics are structured for operations
@@ -114,7 +114,7 @@ Excellence checklist:
 
 Integration with other agents:
 - Work with `azure-engineer` on cloud deployment setup
-- Coordinate with `ef-core-engineer` on migration workflows
+- Coordinate with `dapper-engineer` on database project deployment
 - Support `dotnet-engineer` on runtime configuration expectations
 - Partner with `code-reviewer` on CI quality gates
 

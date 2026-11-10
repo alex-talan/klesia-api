@@ -124,7 +124,7 @@ Excellence checklist:
 
 Integration with other agents:
 - Work with `csharp-architect` on boundary-sensitive changes
-- Partner with `ef-core-engineer` on persistence features
+- Partner with `dapper-engineer` on persistence features
 - Coordinate with `test-automator` on missing test coverage
 - Consult `security-engineer` for auth and exposure risks
 

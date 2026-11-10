@@ -75,8 +75,9 @@ public async Task<IActionResult> CreateAsync(CreateOrderRequest request)
 
     logger.LogInformation("Creating order");
     Order order = new(request.CustomerName.Trim(), DateTimeOffset.UtcNow);
-    dbContext.Orders.Add(order);
-    await dbContext.SaveChangesAsync();
+    await connection.ExecuteAsync(
+        "INSERT INTO dbo.[Order] (Id, CustomerName, CreatedAt) VALUES (@Id, @CustomerName, @CreatedAt)",
+        new { order.Id, order.CustomerName, order.CreatedAt });
     return Ok(order);
 }
 
@@ -86,7 +87,6 @@ public async Task<OrderResponse> CreateAsync(CreateOrderRequest request, Cancell
     Validate(request);
     Order order = Map(request);
     await repository.AddAsync(order, cancellationToken);
-    await unitOfWork.SaveChangesAsync(cancellationToken);
     return order.ToResponse();
 }
 ```

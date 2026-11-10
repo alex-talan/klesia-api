@@ -22,7 +22,7 @@ Audit a .NET solution for boundary integrity, dependency direction, and long-ter
 | Inward dependency violation | Domain references Infrastructure or WebApi | Business logic becomes framework-coupled |
 | Thin abstraction with no value | Interface with one trivial implementation and no boundary role | Extra indirection with no payoff |
 | Fat controller | Controllers performing orchestration, validation, and persistence | Harder testing, duplicated behavior |
-| Infrastructure leakage | Azure SDK types or EF Core entities appear in Application | Vendor and persistence coupling |
+| Infrastructure leakage | Azure SDK types, `SqlConnection` or SQL row types appear in Application | Vendor and persistence coupling |
 | Anemic boundary | Application layer just forwards calls without use-case logic | Layering exists on paper only |
 
 ---
@@ -31,9 +31,9 @@ Audit a .NET solution for boundary integrity, dependency direction, and long-ter
 
 | Layer | Owns | Must Avoid |
 |------|------|------------|
-| Domain | Entities, value objects, domain rules | EF Core, HTTP, Azure SDKs, controllers |
+| Domain | Entities, value objects, domain rules | Dapper, SQL, HTTP, Azure SDKs, controllers |
 | Application | Use cases, DTOs, interfaces, orchestration | Database-specific code, transport models |
-| Infrastructure | EF Core, repositories, SDK clients, file/storage integrations | Core business rules |
+| Infrastructure | Dapper repositories, SQL, SDK clients, file/storage integrations | Core business rules |
 | WebApi | Controllers, middleware, auth wiring, composition root | Domain logic, persistence logic |
 
 ### Dependency Rule
@@ -64,26 +64,27 @@ Dependencies should point inward:
 ### Application Boundary
 
 ```csharp
-// BAD: Application coupled to EF Core directly
-public sealed class CreateOrderHandler(AppDbContext dbContext)
+// BAD: Application coupled to SQL and Dapper directly
+public sealed class CreateOrderHandler(IDbConnection connection)
 {
     public async Task<Guid> HandleAsync(CreateOrderRequest request, CancellationToken cancellationToken)
     {
-        var entity = new Order { CustomerName = request.CustomerName };
-        dbContext.Orders.Add(entity);
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return entity.Id;
+        Guid id = Guid.NewGuid();
+        await connection.ExecuteAsync(new CommandDefinition(
+            "INSERT INTO dbo.[Order] (Id, CustomerName) VALUES (@Id, @CustomerName)",
+            new { Id = id, request.CustomerName },
+            cancellationToken: cancellationToken));
+        return id;
     }
 }
 
-// GOOD: Application depends on abstraction
-public sealed class CreateOrderHandler(IOrderRepository repository, IUnitOfWork unitOfWork)
+// GOOD: Application depends on an abstraction implemented with Dapper in Infrastructure
+public sealed class CreateOrderHandler(IOrderRepository repository)
 {
     public async Task<Guid> HandleAsync(CreateOrderRequest request, CancellationToken cancellationToken)
     {
         Order order = Order.Create(request.CustomerName);
         await repository.AddAsync(order, cancellationToken);
-        await unitOfWork.SaveChangesAsync(cancellationToken);
         return order.Id;
     }
 }
@@ -102,8 +103,10 @@ public async Task<IActionResult> CreateAsync(CreateOrderHttpRequest request, Can
     }
 
     Order order = new(request.CustomerName.Trim());
-    dbContext.Orders.Add(order);
-    await dbContext.SaveChangesAsync(cancellationToken);
+    await connection.ExecuteAsync(new CommandDefinition(
+        "INSERT INTO dbo.[Order] (Id, CustomerName) VALUES (@Id, @CustomerName)",
+        new { order.Id, order.CustomerName },
+        cancellationToken: cancellationToken));
     return CreatedAtAction(nameof(GetAsync), new { id = order.Id }, order);
 }
 
@@ -195,7 +198,7 @@ Suggested commands:
 
 ```bash
 rg "<ProjectReference" -g"*.csproj"
-rg "using Microsoft\\.EntityFrameworkCore|Azure\\.|HttpContext|ControllerBase" src/Application src/Domain
+rg "using Dapper|Microsoft\\.Data\\.SqlClient|Azure\\.|HttpContext|ControllerBase" src/Application src/Domain
 rg "using .*Infrastructure" src/Domain src/Application
-rg "DbContext|BlobServiceClient|ServiceBusClient" src/Application src/Domain
+rg "SqlConnection|IDbConnection|BlobServiceClient|ServiceBusClient" src/Application src/Domain
 ```

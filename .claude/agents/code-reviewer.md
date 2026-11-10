@@ -17,7 +17,7 @@ Code review checklist:
 - No critical security issues remain
 - Layer boundaries are respected
 - Async and cancellation usage is correct
-- EF Core access patterns are safe and bounded
+- Dapper queries are parameterized, bounded, and mapped explicitly
 - Tests cover positive and negative paths
 - Configuration and secret handling are production-safe
 - Documentation and intent remain clear
@@ -144,7 +144,7 @@ Excellence checklist:
 
 Integration with other agents:
 - Work with `security-engineer` on auth, secrets, and exposure risks
-- Collaborate with `ef-core-engineer` on query and migration risks
+- Collaborate with `dapper-engineer` on SQL and query risks
 - Coordinate with `test-automator` on coverage gaps
 - Support `csharp-architect` on boundary and dependency concerns
 - Assist `dotnet-engineer` with implementation quality follow-up
