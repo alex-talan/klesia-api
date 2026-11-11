@@ -58,10 +58,10 @@ internal sealed class DemandRepository(ISqlConnectionFactory connectionFactory) 
     public async Task<Demand?> FindByIdAsync(int demandId, CancellationToken cancellationToken)
     {
         const string sql = """
-            SELECT d.DemandId, d.GKNumber, d.BaeLink, s.Code AS StatusCode
+            SELECT d.Id AS DemandId, d.GKNumber, d.BaeLink, s.Code AS StatusCode
             FROM dbo.Demand AS d
-            INNER JOIN ref.Status AS s ON s.StatusId = d.StatusId
-            WHERE d.DemandId = @DemandId
+            INNER JOIN ref.Status AS s ON s.Id = d.StatusId
+            WHERE d.Id = @DemandId
             """;
 
         await using SqlConnection connection = connectionFactory.CreateConnection();
@@ -72,11 +72,11 @@ internal sealed class DemandRepository(ISqlConnectionFactory connectionFactory) 
     public async Task<IReadOnlyList<Demand>> ListByUserAsync(int userId, CancellationToken cancellationToken)
     {
         const string sql = """
-            SELECT d.DemandId, d.GKNumber, d.BaeLink, s.Code AS StatusCode
+            SELECT d.Id AS DemandId, d.GKNumber, d.BaeLink, s.Code AS StatusCode
             FROM dbo.Demand AS d
-            INNER JOIN ref.Status AS s ON s.StatusId = d.StatusId
+            INNER JOIN ref.Status AS s ON s.Id = d.StatusId
             WHERE d.UserId = @UserId
-            ORDER BY d.DemandId DESC
+            ORDER BY d.Id DESC
             """;
 
         await using SqlConnection connection = connectionFactory.CreateConnection();
@@ -95,8 +95,8 @@ internal sealed class DemandRepository(ISqlConnectionFactory connectionFactory) 
         // The status id is resolved in SQL from its stable code, never hardcoded in C#.
         const string sql = """
             INSERT INTO dbo.Demand (UserId, GKNumber, BaeLink, StatusId)
-            OUTPUT INSERTED.DemandId
-            SELECT @UserId, @GKNumber, @BaeLink, s.StatusId
+            OUTPUT INSERTED.Id
+            SELECT @UserId, @GKNumber, @BaeLink, s.Id
             FROM ref.Status AS s
             WHERE s.Code = N'pending'
             """;
@@ -121,10 +121,10 @@ internal sealed class DemandRepository(ISqlConnectionFactory connectionFactory) 
     {
         const string sql = """
             UPDATE d
-            SET d.StatusId = s.StatusId
+            SET d.StatusId = s.Id
             FROM dbo.Demand AS d
             INNER JOIN ref.Status AS s ON s.Code = @StatusCode
-            WHERE d.DemandId = @DemandId
+            WHERE d.Id = @DemandId
             """;
 
         await using SqlConnection connection = connectionFactory.CreateConnection();
@@ -155,7 +155,7 @@ internal static class TransactionExample
         try
         {
             await connection.ExecuteAsync(new CommandDefinition(
-                "UPDATE dbo.Demand SET StatusId = @StatusId WHERE DemandId = @DemandId",
+                "UPDATE dbo.Demand SET StatusId = @StatusId WHERE Id = @DemandId",
                 new { StatusId = 2, DemandId = 1 },
                 transaction,
                 cancellationToken: cancellationToken));

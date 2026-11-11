@@ -1,13 +1,15 @@
 # KLESIA — Backend Functional & Technical Specification
 
 **Document ID:** KLESIA-BE-SPEC  
-**Version:** 1.2 (Sprint 1 baseline, revised; HTTP contract adopted for all three endpoints)  
-**Date:** 2026-11-09  
+**Version:** 1.3 (Sprint 1 / Lot 1 baseline, revised; GK number, `Id` primary keys, SharePoint copy requirement)  
+**Date:** 2026-11-11  
 **Status:** Implementation-ready for Sprint 1; future contracts recorded separately  
 **Language:** English  
 **Primary audience:** Backend engineers, database engineers, AI coding agents, QA and infrastructure engineers
 
 > **Purpose.** This document specifies the incremental implementation of the KLESIA backend. Sprint 1 delivers an authenticated, authorized read-only demand-list API and the relational database supporting that view. The SignalR negotiation and demand-creation (PDF upload) contracts are **adopted** jointly with the frontend **but are not Sprint 1 implementation work**. The machine-readable HTTP contract of all three endpoints is `contracts/openapi.yaml` (workspace root), the single source of truth: this document and the OpenAPI file MUST stay identical on every HTTP detail. Later sprints should extend this document rather than silently changing existing contracts.
+
+> **Terminology.** "Sprint 1" in this document is the delivery called **Lot 1 (LOT1)** by the client. Demand creation (`POST /api/v1/demands`) and the SignalR negotiation are **not part of Lot 1**.
 
 ## 1. Normative language and scope
 
@@ -35,7 +37,7 @@
 
 - `POST /api/v1/notifications/negotiate` and the Azure SignalR `demands` notification channel: **contract adopted in §7.1 and `contracts/openapi.yaml`, implementation deferred**.
 - `demandUpdated` publication and demand-status mutation: deferred; no status-changing HTTP endpoint is specified.
-- `POST /api/v1/demands` (demand creation with PDF upload, size/content validation and SharePoint storage): **contract adopted in §7.3 and `contracts/openapi.yaml`, implementation deferred**.
+- `POST /api/v1/demands` (demand creation with PDF upload, size/content validation and SharePoint storage): **contract adopted in §7.3 and `contracts/openapi.yaml`, implementation deferred; not part of Lot 1**.
 - Demand update, delete, status transitions (other than the initial `pending`), pagination, filtering or searching.
 - Provisioning new users via API; management of roles/users via API.
 - Additional business entities, audit-history tables, or user-role join tables.
@@ -48,13 +50,13 @@
 | OPEN-01 | **Resolved.** The overall API has **three HTTP endpoints**, all with an adopted contract: `GET /api/v1/demands` (§5.1, Sprint 1), `POST /api/v1/notifications/negotiate` (§7.1) and `POST /api/v1/demands` (§7.3). The `demandUpdated` event is **not** HTTP. | The contract of all three is frozen in `contracts/openapi.yaml`. Only `GET /api/v1/demands` (plus `GET /health`) is implemented in Sprint 1; do not create placeholder routes for the other two. They are implemented in later sprints. |
 | OPEN-02 | The broad API description includes SignalR, while the final Sprint 1 statement limits functionality to the initial user/demand screen. | The final Sprint 1 restriction takes precedence for **implementation**. Implement the list route now; the SignalR negotiation contract is adopted (§7.1) and implemented later. |
 | OPEN-03 | The precise delegated API scope name, Entra tenant ID and API application ID are absent. | Supplied through configuration (§6.1: `AzureAd:*`); never hard-coded. The API refuses to start while they are missing or still placeholders. |
-| OPEN-04 | **Resolved.** The only authorization rule for now is *own data only*: an authenticated, allowlisted, active user receives exclusively the demands whose `Demand.UserId` is their own `sec.User.UserId`. | The role codes `admin`, `operational` and `guest` are confirmed as the real codes, but **no role grants or removes any access in Sprint 1**. Do not infer cross-user, administrator or role-based behavior. |
+| OPEN-04 | **Resolved.** The only authorization rule for now is *own data only*: an authenticated, allowlisted, active user receives exclusively the demands whose `Demand.UserId` is their own `sec.User.Id`. | The role codes `admin`, `operational` and `guest` are confirmed as the real codes, but **no role grants or removes any access in Sprint 1**. Do not infer cross-user, administrator or role-based behavior. |
 | OPEN-05 | **Resolved.** The PDFs are stored in **SharePoint**. `Demand.BaeLink` holds the absolute HTTPS URL of the document in SharePoint. | The API returns that URL after validating that it is an absolute HTTPS URL. SharePoint permissions are the access gate: the browser opens the link with the user's own Entra single sign-on session, so no bearer header, no SAS-style signature and no anonymous link is involved. The links are **permanent** SharePoint URLs: no time-limited, signed or anonymous sharing links are used, and `IBaeLinkResolver` stays a pass-through. Changing this needs a separate decision (tenant sharing policy, Graph permissions). |
 | INT-05 | `maxPdfSizeMb`: 10 MB is illustrative, not confirmed. | The upload endpoint is now specified (§7.3). The limit is the backend setting `Upload:MaxPdfSizeMb`, provisionally 10 (1 MB = 1,048,576 bytes); it MUST equal the webapp's `public/config/app-config.json` value and be confirmed by the operator before production. |
 | INT-08 | Exact error-body JSON structure. | **Resolved.** Every error response of an application route is RFC 9457 (7807) `application/problem+json` (§5.2). The HTTP status stays the primary signal; the frontend never renders server text. |
 | DEC-01 | Backend target framework. | **.NET 10 (`net10.0`)** from the start (SDK pinned in `global.json`). |
 | DEC-02 | Data access technology. | **Dapper** over `Microsoft.Data.SqlClient`. **Entity Framework Core, `DbContext` and EF migrations MUST NOT be used.** The SQL database project is the single owner of the schema. |
-| DEC-03 | Existing repository files take precedence over earlier draft DDL. | Primary keys are `{Table}Id`, constraint names follow the single scheme of DB-06, column sizes and defaults follow the files already present in `database/`, and the `ref` schema is kept. The draft DDL in earlier revisions of this document is superseded by §3.4. |
+| DEC-03 | Existing repository files take precedence over earlier draft DDL. | Primary keys are named `Id` (DEC-12, DB-03), constraint names follow the single scheme of DB-06, column sizes and defaults follow the files already present in `database/`, and the `ref` schema is kept. The draft DDL in earlier revisions of this document is superseded by §3.4. |
 | DEC-04 | Where configuration values live. | Entra, CORS and SQL settings are configuration-file values (§6.1), never code constants. |
 | DEC-05 | Seeded identity. | The seed script creates the project owner's account as an active `admin` user, as explicitly requested. Further identities are added by editing the same script. |
 | DEC-06 | Local development against Azure SQL Database. | One connection string works on a developer PC and in Azure: `Authentication=Active Directory Default` (see §6.1). No password is ever stored. |
@@ -63,7 +65,9 @@
 | DEC-09 | JSON naming convention. | Business payloads (request parts and response bodies) use `snake_case`. The SignalR negotiation response (`url`, `accessToken`) is a protocol payload whose names are fixed by the SignalR client; it is the **only** camelCase exception and MUST NOT be renamed. |
 | DEC-10 | Success status of `POST /api/v1/demands`. | `201 Created` with the created demand as body (same shape as a `demands[]` item). There is no single-demand route, so no `Location` header is sent. The frontend treats any 2xx as success and ignores the body. |
 | DEC-11 | Delegated scope name. | The delegated scope is named `access_as_user` (fixed in the contract's OAuth2 security scheme and set in `AzureAd:RequiredScope`). The full scope requested by the SPA is `api://<API client id>/access_as_user`. |
-| OPEN-06 | How the API writes the uploaded PDF into SharePoint (for example Microsoft Graph with the App Service managed identity; site/library location, folder naming, permissions so that the demand owner can open the file). | **Open — blocks the implementation of §7.3, not its HTTP contract.** Hidden behind `IBaeDocumentStore`; needs a separate decision (tenant policy, Graph permissions). |
+| DEC-12 | Primary-key naming. | Every primary key is named `Id` (`sec.Role.Id`, `sec.User.Id`, `ref.Status.Id`, `dbo.Demand.Id`), as in the database project. Foreign keys keep the `{ReferencedTable}Id` form (`RoleId`, `UserId`, `StatusId`). Dapper queries alias keys to the domain names (`d.Id AS DemandId`); the JSON field `demand_id` is `dbo.Demand.Id`. This replaces the earlier `{Table}Id` rule. |
+| DEC-13 | Copy of the uploaded PDF into SharePoint (demand creation, **not part of Lot 1**). | **Requirement:** the backend MUST copy the PDF received by `POST /api/v1/demands` into the SharePoint document library and MUST store the resulting permanent HTTPS link in `Demand.BaeLink`, so that the user can open the document later from the `bae_link` returned by `GET /api/v1/demands`. The browser never uploads to SharePoint; the database stores the link, never the file; the API server keeps no copy. All SharePoint access is isolated in `IBaeDocumentStore` (Infrastructure). The stored file name is generated by the backend (for example `{GKNumber}/{unique id}.pdf`) and never taken from the client, so repeated submissions of the same GK number cannot overwrite each other. **ASSUMPTION** (to confirm with the Microsoft 365 administrators before that sprint): upload through Microsoft Graph as the App Service managed identity with the least-privilege `Sites.Selected` permission on the one target site; site, library and base folder come from configuration (`SharePoint:*`, §6.1), never from code or from the client. Who may open a document stays a SharePoint matter (OPEN-05): the library permissions must let the intended users open it; the API does not manage per-document permissions. |
+| OPEN-06 | **Resolved.** How the uploaded BAE PDF reaches SharePoint. | Stated as an explicit requirement in **DEC-13**: copy into SharePoint, store the link in `Demand.BaeLink`. Only deployment settings remain (site, library, folder, permission grant); they are configuration, not an open question about the HTTP contract. Out of Lot 1. |
 
 ## 2. System context and architectural boundaries
 
@@ -99,7 +103,7 @@ flowchart LR
 |---|---|
 | DB-01 | Use separate files for SQL schemas and every table definition. |
 | DB-02 | Exactly four domain tables: `sec.Role`, `sec.User`, `ref.Status`, `dbo.Demand`. Schema usage: `sec` for security tables, `ref` for reference/lookup tables (the status lookup), `dbo` for business data. |
-| DB-03 | Every table has a primary key named after its table: `{Table}Id INT IDENTITY(1,1)` — `RoleId`, `UserId`, `StatusId`, `DemandId`. |
+| DB-03 | Every table has a primary key named `Id`: `Id INT IDENTITY(1,1)` (`sec.Role.Id`, `sec.User.Id`, `ref.Status.Id`, `dbo.Demand.Id`). Foreign-key columns are named `{ReferencedTable}Id` (`RoleId`, `UserId`, `StatusId`), see DEC-12. |
 | DB-04 | All schema, table and column identifiers use PascalCase, except the schema identifiers `sec`, `dbo` and `ref`. |
 | DB-05 | Declare every foreign key explicitly and create an index with the foreign-key column as leading key. Do not create an index that duplicates the primary key or a unique constraint. |
 | DB-06 | Name every constraint and index with the **single scheme** below. |
@@ -129,12 +133,12 @@ erDiagram
     User ||--o{ Demand : "UserId"
     Status ||--o{ Demand : "StatusId"
     Role {
-      int RoleId PK
+      int Id PK
       nvarchar Name
       nvarchar Code UK
     }
     User {
-      int UserId PK
+      int Id PK
       uniqueidentifier UserUniqueId UK
       int RoleId FK
       nvarchar Name
@@ -143,14 +147,14 @@ erDiagram
       bit IsActive
     }
     Status {
-      int StatusId PK
+      int Id PK
       nvarchar Name
       nvarchar DisplayName
       nvarchar Code UK
       nvarchar Description
     }
     Demand {
-      int DemandId PK
+      int Id PK
       int UserId FK
       char GKNumber
       nvarchar BaeLink
@@ -158,7 +162,7 @@ erDiagram
     }
 ```
 
-**Critical identity distinction:** `sec.User.UserId` is the internal SQL identity (`INT`). `sec.User.UserUniqueId` is the Microsoft Entra user's `oid` (`UNIQUEIDENTIFIER`). The API's `user_id` response field refers to **`UserUniqueId`**, never the internal `UserId`.
+**Critical identity distinction:** `sec.User.Id` is the internal SQL identity (`INT`). `sec.User.UserUniqueId` is the Microsoft Entra user's `oid` (`UNIQUEIDENTIFIER`). The API's `user_id` response field refers to **`UserUniqueId`**, never the internal `Id`.
 
 ### 3.3 Canonical table contracts
 
@@ -166,7 +170,7 @@ erDiagram
 
 | Column | SQL type | Null | Rules |
 |---|---|---|---|
-| `RoleId` | `INT IDENTITY(1,1)` | No | `PK_Role` |
+| `Id` | `INT IDENTITY(1,1)` | No | `PK_Role` |
 | `Name` | `NVARCHAR(300)` | No | Display/human-readable role name |
 | `Code` | `NVARCHAR(50)` | No | Unique stable role identifier: `AK_Role_Code`. Confirmed codes: `admin`, `operational`, `guest` |
 
@@ -176,9 +180,9 @@ A role can be associated with multiple users; each user has exactly one role. **
 
 | Column | SQL type | Null | Rules |
 |---|---|---|---|
-| `UserId` | `INT IDENTITY(1,1)` | No | `PK_User` |
+| `Id` | `INT IDENTITY(1,1)` | No | `PK_User` |
 | `UserUniqueId` | `UNIQUEIDENTIFIER` | No | Entra `oid`; `AK_User_UserUniqueId` |
-| `RoleId` | `INT` | No | `FK_User_Role` → `sec.Role(RoleId)`; indexed by `IX_User_RoleId`; default `1` (`DF_User_RoleId`) |
+| `RoleId` | `INT` | No | `FK_User_Role` → `sec.Role(Id)`; indexed by `IX_User_RoleId`; default `1` (`DF_User_RoleId`) |
 | `Name` | `NVARCHAR(300)` | No | Entire name, returned in API as `user_name` |
 | `Email` | `NVARCHAR(300)` | No | Informational only; **never** use to identify/authorize users |
 | `IsInternal` | `BIT` | No | Internal-company flag; default `1` (`DF_User_IsInternal`) |
@@ -194,7 +198,7 @@ The `UserUniqueId` uniqueness is based on the **ASSUMPTION** of a single configu
 
 | Column | SQL type | Null | Rules |
 |---|---|---|---|
-| `StatusId` | `INT IDENTITY(1,1)` | No | `PK_Status` |
+| `Id` | `INT IDENTITY(1,1)` | No | `PK_Status` |
 | `Name` | `NVARCHAR(100)` | No | Internal name |
 | `DisplayName` | `NVARCHAR(100)` | No | Human-readable label |
 | `Code` | `NVARCHAR(20)` | No | Unique: `AK_Status_Code`; allowed `pending`, `ok`, `fail` (`CK_Status_Code`) |
@@ -206,11 +210,11 @@ Status `Code` is the source of the API `status` property; do not return the `Nam
 
 | Column | SQL type | Null | Rules |
 |---|---|---|---|
-| `DemandId` | `INT IDENTITY(1,1)` | No | `PK_Demand` |
-| `UserId` | `INT` | No | `FK_Demand_User` → `sec.User(UserId)`; indexed by `IX_Demand_UserId` |
+| `Id` | `INT IDENTITY(1,1)` | No | `PK_Demand` |
+| `UserId` | `INT` | No | `FK_Demand_User` → `sec.User(Id)`; indexed by `IX_Demand_UserId` |
 | `GKNumber` | `CHAR(18)` | No | GK (Geode Klesia) number: `GK` + six digits (a `YYMMDD` date) + hyphen + nine digits, e.g. `GK260902-144743112` (`CK_Demand_GKNumber`) |
 | `BaeLink` | `NVARCHAR(2048)` | No | Absolute HTTPS URL of the PDF in SharePoint; checked at least for the HTTPS prefix (`CK_Demand_BaeLink`) |
-| `StatusId` | `INT` | No | `FK_Demand_Status` → `ref.Status(StatusId)`; indexed by `IX_Demand_StatusId` |
+| `StatusId` | `INT` | No | `FK_Demand_Status` → `ref.Status(Id)`; indexed by `IX_Demand_StatusId` |
 
 **The GK number is a string.** It is stored as text (`CHAR(18)`), carried as a string in the domain (`GKNumber`), in the DTOs and in JSON, exactly as stored (no reformatting). Its format is `GK` + six digits (a date, `YYMMDD`) + a hyphen (`-`) + a number of nine digits, e.g. `GK260902-144743112` (regex `^GK[0-9]{6}-[0-9]{9}$`). The database check enforces this format with a literal pattern and a binary collation (so that the prefix is case-sensitive and a shorter value padded with spaces is rejected). Validating that the six digits form a real calendar date, or any checksum, is **not** required in this sprint.
 
@@ -238,10 +242,10 @@ CREATE SCHEMA [ref] AUTHORIZATION [dbo]
 ```sql
 CREATE TABLE [sec].[Role]
 (
-    [RoleId] INT IDENTITY(1,1) NOT NULL,
+    [Id] INT IDENTITY(1,1) NOT NULL,
     [Name] NVARCHAR(300) NOT NULL,
     [Code] NVARCHAR(50) NOT NULL,
-    CONSTRAINT [PK_Role] PRIMARY KEY CLUSTERED ([RoleId]),
+    CONSTRAINT [PK_Role] PRIMARY KEY CLUSTERED ([Id]),
     CONSTRAINT [AK_Role_Code] UNIQUE ([Code])
 );
 ```
@@ -251,16 +255,16 @@ CREATE TABLE [sec].[Role]
 ```sql
 CREATE TABLE [sec].[User]
 (
-    [UserId] INT IDENTITY(1,1) NOT NULL,
+    [Id] INT IDENTITY(1,1) NOT NULL,
     [UserUniqueId] UNIQUEIDENTIFIER NOT NULL,
     [RoleId] INT NOT NULL CONSTRAINT [DF_User_RoleId] DEFAULT 1,
     [Name] NVARCHAR(300) NOT NULL,
     [Email] NVARCHAR(300) NOT NULL,
     [IsInternal] BIT NOT NULL CONSTRAINT [DF_User_IsInternal] DEFAULT 1,
     [IsActive] BIT NOT NULL CONSTRAINT [DF_User_IsActive] DEFAULT 1,
-    CONSTRAINT [PK_User] PRIMARY KEY CLUSTERED ([UserId]),
+    CONSTRAINT [PK_User] PRIMARY KEY CLUSTERED ([Id]),
     CONSTRAINT [AK_User_UserUniqueId] UNIQUE ([UserUniqueId]),
-    CONSTRAINT [FK_User_Role] FOREIGN KEY ([RoleId]) REFERENCES [sec].[Role] ([RoleId])
+    CONSTRAINT [FK_User_Role] FOREIGN KEY ([RoleId]) REFERENCES [sec].[Role] ([Id])
 );
 GO
 
@@ -269,19 +273,19 @@ CREATE NONCLUSTERED INDEX [IX_User_RoleId]
 GO
 ```
 
-The index `IX_User` that existed on `UserId` (the primary key) was removed as redundant and replaced by `IX_User_RoleId`, which supports the `FK_User_Role` foreign key (DB-05).
+The index `IX_User` that existed on `Id` (the primary key) was removed as redundant and replaced by `IX_User_RoleId`, which supports the `FK_User_Role` foreign key (DB-05).
 
 **`Tables/ref/Status.sql`**
 
 ```sql
 CREATE TABLE [ref].[Status]
 (
-    [StatusId] INT IDENTITY(1,1) NOT NULL,
+    [Id] INT IDENTITY(1,1) NOT NULL,
     [Name] NVARCHAR(100) NOT NULL,
     [DisplayName] NVARCHAR(100) NOT NULL,
     [Code] NVARCHAR(20) NOT NULL,
     [Description] NVARCHAR(500) NULL,
-    CONSTRAINT [PK_Status] PRIMARY KEY CLUSTERED ([StatusId]),
+    CONSTRAINT [PK_Status] PRIMARY KEY CLUSTERED ([Id]),
     CONSTRAINT [AK_Status_Code] UNIQUE ([Code]),
     CONSTRAINT [CK_Status_Code] CHECK
         ([Code] COLLATE Latin1_General_100_BIN2 IN (N'pending', N'ok', N'fail'))
@@ -294,14 +298,14 @@ GO
 ```sql
 CREATE TABLE [dbo].[Demand]
 (
-    [DemandId] INT IDENTITY(1,1) NOT NULL,
+    [Id] INT IDENTITY(1,1) NOT NULL,
     [UserId] INT NOT NULL,
     [GKNumber] CHAR(18) NOT NULL,
     [BaeLink] NVARCHAR(2048) NOT NULL,
     [StatusId] INT NOT NULL,
-    CONSTRAINT [PK_Demand] PRIMARY KEY CLUSTERED ([DemandId]),
-    CONSTRAINT [FK_Demand_User] FOREIGN KEY ([UserId]) REFERENCES [sec].[User] ([UserId]),
-    CONSTRAINT [FK_Demand_Status] FOREIGN KEY ([StatusId]) REFERENCES [ref].[Status] ([StatusId]),
+    CONSTRAINT [PK_Demand] PRIMARY KEY CLUSTERED ([Id]),
+    CONSTRAINT [FK_Demand_User] FOREIGN KEY ([UserId]) REFERENCES [sec].[User] ([Id]),
+    CONSTRAINT [FK_Demand_Status] FOREIGN KEY ([StatusId]) REFERENCES [ref].[Status] ([Id]),
     CONSTRAINT [CK_Demand_GKNumber] CHECK
         ([GKNumber] COLLATE Latin1_General_100_BIN2 LIKE 'GK[0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'),
     CONSTRAINT [CK_Demand_BaeLink] CHECK ([BaeLink] LIKE N'https://%')
@@ -309,7 +313,7 @@ CREATE TABLE [dbo].[Demand]
 GO
 
 CREATE NONCLUSTERED INDEX [IX_Demand_UserId]
-    ON [dbo].[Demand] ([UserId], [DemandId] DESC);
+    ON [dbo].[Demand] ([UserId], [Id] DESC);
 GO
 
 CREATE NONCLUSTERED INDEX [IX_Demand_StatusId]
@@ -317,7 +321,7 @@ CREATE NONCLUSTERED INDEX [IX_Demand_StatusId]
 GO
 ```
 
-**Implementation notes:** `IX_Demand_UserId` leads with the foreign-key column (DB-05) and its descending `DemandId` serves the API ordering `DemandId DESC` without a sort. No `ON DELETE CASCADE` clause is permitted. The HTTPS `CHECK` is a simple guard only; code must separately parse and validate URLs. Future `Year`, `Month`, percentages and monetary amounts are not present in this sprint, so no speculative fields/checks are to be added.
+**Implementation notes:** `IX_Demand_UserId` leads with the foreign-key column (DB-05) and its descending `Id` serves the API ordering `Id DESC` without a sort. No `ON DELETE CASCADE` clause is permitted. The HTTPS `CHECK` is a simple guard only; code must separately parse and validate URLs. Future `Year`, `Month`, percentages and monetary amounts are not present in this sprint, so no speculative fields/checks are to be added.
 
 ### 3.5 Project layout, build and deployment
 
@@ -461,12 +465,12 @@ SELECT sec.User WHERE UserUniqueId = oid   (parameterized)
          +-- not found ----------> 403 Forbidden
          +-- IsActive = 0 -------> 403 Forbidden   (identical response)
          +-- found + active -----> authorized user context
-                                    (internal SQL User.UserId)
+                                    (internal SQL User.Id)
 ```
 
 - A row in `sec.User` is an **allowlist entry**, not a provisioning request.
 - `IsActive = 0` means denied, even with a cryptographically valid Entra token.
-- **The only authorization rule is *own data only*** (OPEN-04): the authorized user receives exclusively the demands whose `Demand.UserId` equals their own `sec.User.UserId`.
+- **The only authorization rule is *own data only*** (OPEN-04): the authorized user receives exclusively the demands whose `Demand.UserId` equals their own `sec.User.Id`.
 - `IsInternal` is **not** an access gate in Sprint 1; it is informational until business rules are defined.
 - `RoleId` must reference an existing `sec.Role` but grants **no elevated access and removes none** in Sprint 1.
 - Do not create or update `sec.User` automatically during a request.
@@ -525,10 +529,10 @@ Accept: application/json
 
 | JSON property | Type | Source / rule |
 |---|---|---|
-| `user_id` | string | Normalized GUID from validated Entra `oid` / matched `sec.User.UserUniqueId`. **Not** `sec.User.UserId`. |
+| `user_id` | string | Normalized GUID from validated Entra `oid` / matched `sec.User.UserUniqueId`. **Not** `sec.User.Id`. |
 | `user_name` | string | `sec.User.Name` from matched active DB row. |
-| `demands` | array | All demand rows whose `Demand.UserId` is the matched internal `sec.User.UserId` (zero or more). |
-| `demands[].demand_id` | integer | `dbo.Demand.DemandId`. |
+| `demands` | array | All demand rows whose `Demand.UserId` is the matched internal `sec.User.Id` (zero or more). |
+| `demands[].demand_id` | integer | `dbo.Demand.Id`. |
 | `demands[].gk_number` | string | `dbo.Demand.GKNumber`, returned unchanged (e.g. `GK260902-144743112`). No formatting is applied. |
 | `demands[].bae_link` | string | `dbo.Demand.BaeLink`: the **HTTPS URL** of the corresponding PDF in SharePoint, validated by the backend. It opens in the browser with the user's own SharePoint/Entra session, without a frontend-provided bearer Authorization header. |
 | `demands[].status` | string enum | `ref.Status.Code`, exclusively `pending`, `ok`, `fail`. |
@@ -547,12 +551,12 @@ Accept: application/json
 
 1. Authenticate bearer token and require the configured delegated scope.
 2. Resolve an active `sec.User` using validated `oid`; otherwise return `403`.
-3. Read demands only where `dbo.Demand.UserId = sec.User.UserId`; join `ref.Status` by `StatusId`.
+3. Read demands only where `dbo.Demand.UserId = sec.User.Id`; join `ref.Status` by `StatusId`.
 4. Map the response to exactly the specified snake_case field names and types; no database rows or domain objects serialized directly.
 5. Return the stored GK number unchanged (no formatting).
 6. Return the stored status code verbatim (from the three allowed lowercase codes).
 7. Resolve `BaeLink` through the link-resolver abstraction. In Sprint 1 the stored SharePoint URL is returned unchanged after verifying that it is an absolute HTTPS URL; a stored value that is not (data-integrity fault) produces a sanitized `5xx` and is never logged or returned. Never create anonymous links, never expose credentials, and never assume the frontend can attach the API bearer token when opening the PDF.
-8. **ASSUMPTION:** order demands by `Demand.DemandId DESC` for deterministic display until a product ordering requirement is defined. The frontend MUST NOT treat this ordering as a permanent business contract.
+8. **ASSUMPTION:** order demands by `Demand.Id DESC` for deterministic display until a product ordering requirement is defined. The frontend MUST NOT treat this ordering as a permanent business contract.
 9. Do not cap or paginate results in Sprint 1 without explicitly changing the API response contract. Flag performance concerns if volume makes this unsuitable.
 10. Prevent cross-user data leakage, including in errors and logs.
 
@@ -598,7 +602,7 @@ Backend settings are bound as strongly typed options and validated at startup: t
 | Configuration sources | Precedence, lowest to highest: `appsettings.json` (empty values, tracked) → `appsettings.{Environment}.json` (placeholders, tracked) → `appsettings.Local.json` (personal values, **git-ignored**) → environment variables (`AzureAd__TenantId`, `Cors__AllowedOrigins__0`, `ConnectionStrings__KlesiaDb`). |
 | Logging | Log level, correlation id (`X-Correlation-Id`, generated when absent or unsafe), telemetry backend if already used. |
 | SignalR (adopted, implemented after Sprint 1) | SignalR endpoint/resource name, managed identity configuration and hub identifier `demands`; the Azure SignalR Service CORS origins equal `Cors:AllowedOrigins`. |
-| PDF upload (adopted, implemented after Sprint 1) | `Upload:MaxPdfSizeMb` — maximum PDF size in MB (1 MB = 1,048,576 bytes), provisionally `10`, identical to the webapp's `maxPdfSizeMb`; request-size limits (Kestrel, `FormOptions`) MUST be aligned to it; SharePoint site/library settings (OPEN-06). Nothing is needed in Sprint 1: SharePoint links are returned as stored. |
+| PDF upload (adopted, implemented after Sprint 1) | `Upload:MaxPdfSizeMb` — maximum PDF size in MB (1 MB = 1,048,576 bytes), provisionally `10`, identical to the webapp's `maxPdfSizeMb`; request-size limits (Kestrel, `FormOptions`) MUST be aligned to it; `SharePoint:SiteId`, `SharePoint:LibraryName` and `SharePoint:BaseFolder` (DEC-13); the managed identity needs `Sites.Selected` on that one site only. Nothing is needed in Sprint 1: SharePoint links are returned as stored. |
 
 Store credentials and connection secrets in environment-specific secret stores or managed identity configuration. Avoid checking credentials into `appsettings.json`, `.env` tracked files, Bicep parameter defaults, `Azure.publish.xml`, examples, log files or simulator artifacts.
 
@@ -677,8 +681,8 @@ There is **no `user_id` part** and none is read: the owner is always the user of
 
 1. Same evaluation order as §4 (token → scope → active allowlisted user); failures give the same `401`/`403` as the `GET` and store nothing.
 2. Reject a non-multipart request (`415`); a missing, duplicated or unknown part or an invalid GK number (`400`); an oversized file (`413`); a file that is not a real PDF (`422`: the content starts with `%PDF-` and the declared type is `application/pdf`; the file extension and the client MIME type are never trusted alone).
-3. Store the PDF in SharePoint through `IBaeDocumentStore` and obtain its permanent HTTPS URL (OPEN-06).
-4. Insert one `dbo.Demand` row: `UserId` = the matched user, `GKNumber` = the submitted GK number, `BaeLink` = that URL, `StatusId` = the status whose code is `pending`. If the insert fails after the upload, remove the stored document on a best-effort basis and return `5xx`.
+3. **Copy the PDF into SharePoint (DEC-13).** The backend uploads the received file into the configured SharePoint document library through `IBaeDocumentStore` and obtains the permanent HTTPS link of that stored copy. The file is not kept on the API server and never stored in the database. If SharePoint is unavailable, answer `503` and store nothing.
+4. **Store the link.** Insert one `dbo.Demand` row: `UserId` = the matched user, `GKNumber` = the submitted GK number, `BaeLink` = the SharePoint link obtained in step 3, `StatusId` = the status whose code is `pending`. This link is what `GET /api/v1/demands` later returns as `bae_link`, so that the user can load the document whenever needed. If the insert fails after the copy, remove the SharePoint copy on a best-effort basis and return `5xx`.
 5. Respond `201 Created` (DEC-10) with the created demand as JSON, shaped like a `demands[]` item of §5.1 (`demand_id`, `gk_number`, `bae_link`, `status: "pending"`). No `Location` header (no single-demand route exists).
 6. **Read-after-write:** the row is committed before `201` is sent, so the next `GET /api/v1/demands` already contains the demand.
 7. **Duplicates allowed (INT-09):** the same GK number or document may be submitted again; each call creates a new demand. The operation is not idempotent and the frontend never retries it automatically.
@@ -769,7 +773,7 @@ Keep token validation separate from business query logic. Avoid introducing unre
 - [ ] Automated coverage exists for the Sprint 1 acceptance matrix; instructions to run/build/test/deploy are committed to the repository.
 - [ ] Data access uses Dapper only: no Entity Framework Core package, `DbContext` or migration exists in the solution.
 - [ ] The solution targets `net10.0`; AT-15, AT-16 and AT-17 are runnable against a disposable Azure SQL database (`KLESIA_TEST_SQL_CONNECTION`).
-- [ ] The adopted post-Sprint-1 routes (negotiate, `POST /api/v1/demands`) are **not presented as delivered**; unresolved decisions (OPEN-06) remain recorded.
+- [ ] The adopted post-Sprint-1 routes (negotiate, `POST /api/v1/demands`) are **not presented as delivered**; the SharePoint settings of DEC-13 (site, library, folder, permission grant) remain to be confirmed before that sprint.
 
 ## 10. Implementation instructions for coding agents
 

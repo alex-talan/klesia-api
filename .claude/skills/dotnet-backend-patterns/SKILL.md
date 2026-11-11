@@ -202,11 +202,11 @@ internal sealed class DemandRepository(ISqlConnectionFactory connectionFactory) 
     public async Task<IReadOnlyList<Demand>> ListByUserAsync(int userId, CancellationToken cancellationToken)
     {
         const string sql = """
-            SELECT d.DemandId, d.GKNumber, d.BaeLink, s.Code AS StatusCode
+            SELECT d.Id AS DemandId, d.GKNumber, d.BaeLink, s.Code AS StatusCode
             FROM dbo.Demand AS d
-            INNER JOIN ref.Status AS s ON s.StatusId = d.StatusId
+            INNER JOIN ref.Status AS s ON s.Id = d.StatusId
             WHERE d.UserId = @UserId
-            ORDER BY d.DemandId DESC
+            ORDER BY d.Id DESC
             """;
 
         await using SqlConnection connection = connectionFactory.CreateConnection();
@@ -222,7 +222,7 @@ Conventions:
 - SQL lives in `const` raw string literals next to the method that runs it. Explicit column lists, no `SELECT *`.
 - Always parameterize (`@UserId`). Never concatenate or interpolate user input into SQL text.
 - Pass the token through `CommandDefinition`.
-- Schemas are `dbo`, `ref`, `sec`; primary keys are `{Table}Id`. Bracket reserved names (`[sec].[User]`).
+- Schemas are `dbo`, `ref`, `sec`; primary keys are named `Id` and foreign keys `{ReferencedTable}Id`; alias keys to the domain names in `SELECT` (`d.Id AS DemandId`). Bracket reserved names (`[sec].[User]`).
 - Bound read queries (paging or a natural key). Sprint 1 returns the full demand list by specification.
 - Map rows to Domain types or Application DTOs. Never return persistence shapes from controllers.
 - Open one short-lived connection per repository call. Use an explicit transaction only when several statements must succeed together.

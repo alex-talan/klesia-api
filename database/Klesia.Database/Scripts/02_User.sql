@@ -11,7 +11,7 @@ MERGE [sec].[User] AS target
 USING (
     SELECT
         v.[UserUniqueId],
-        r.[RoleId],
+        r.[Id] AS [RoleId],
         v.[Name],
         v.[Email],
         v.[IsInternal],
