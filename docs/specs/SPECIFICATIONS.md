@@ -62,7 +62,7 @@
 | DEC-06 | Local development against Azure SQL Database. | One connection string works on a developer PC and in Azure: `Authentication=Active Directory Default` (see §6.1). No password is ever stored. |
 | DEC-07 | Hosting topology. | Backend: **Azure App Service** connected to Azure SQL Database. Frontend: **Azure Static Web Apps**. |
 | DEC-08 | Canonical HTTP contract. | `contracts/openapi.yaml` is the single source of truth for routes, schemas, status codes, headers and CORS. This document explains and constrains it; any conflict is fixed in both files in the same change. |
-| DEC-09 | JSON naming convention. | Business payloads (request parts and response bodies) use `snake_case`. The SignalR negotiation response (`url`, `accessToken`) is a protocol payload whose names are fixed by the SignalR client; it is the **only** camelCase exception and MUST NOT be renamed. |
+| DEC-09 | JSON naming convention. | Business payloads (request parts and response bodies) use `snake_case`. The SignalR negotiation response (`url`, `accessToken`) is a protocol payload whose names are fixed by the SignalR client; it is, with `ProblemDetails` (RFC 9457 / ASP.NET Core standard names such as `traceId`), one of the **only two** camelCase exceptions; neither is renamed. |
 | DEC-10 | Success status of `POST /api/v1/demands`. | `201 Created` with the created demand as body (same shape as a `demands[]` item). There is no single-demand route, so no `Location` header is sent. The frontend treats any 2xx as success and ignores the body. |
 | DEC-11 | Delegated scope name. | The delegated scope is named `access_as_user` (fixed in the contract's OAuth2 security scheme and set in `AzureAd:RequiredScope`). The full scope requested by the SPA is `api://<API client id>/access_as_user`. |
 | DEC-12 | Primary-key naming. | Every primary key is named `Id` (`sec.Role.Id`, `sec.User.Id`, `ref.Status.Id`, `dbo.Demand.Id`), as in the database project. Foreign keys keep the `{ReferencedTable}Id` form (`RoleId`, `UserId`, `StatusId`). Dapper queries alias keys to the domain names (`d.Id AS DemandId`); the JSON field `demand_id` is `dbo.Demand.Id`. This replaces the earlier `{Table}Id` rule. |
@@ -494,7 +494,7 @@ This table is the single authority for authentication/authorization outcomes; §
 
 ## 5. HTTP API — Sprint 1
 
-> **Canonical contract (DEC-08, DEC-09).** The exact routes, schemas, status codes, headers and CORS rules are in `contracts/openapi.yaml`; this section explains them. Business JSON is `snake_case`; the only camelCase payload is the SignalR negotiation response (§7.1), whose shape is fixed by the SignalR protocol.
+> **Canonical contract (DEC-08, DEC-09).** The exact routes, schemas, status codes, headers and CORS rules are in `contracts/openapi.yaml`; this section explains them. Business JSON is `snake_case`; the only camelCase payloads are the SignalR negotiation response (§7.1) and `ProblemDetails` (§5.2); the negotiation shape is fixed by the SignalR protocol.
 
 ### 5.1 `GET /api/v1/demands` (API-01)
 
@@ -643,7 +643,7 @@ Success: `200 OK`:
 - Use backend managed identity to access Azure SignalR. The supplied infrastructure contract assigns **SignalR Service Owner** in Bicep, which matches a serverless negotiate + REST-publish use case; verify that resource mode and role assignments are consistent at implementation time. Never return the service access key to the browser.
 - Explicitly configure API and Azure SignalR allowed frontend origins (Azure resource/Bicep where relevant).
 - Do not add a separately exposed, unprotected `/negotiate` endpoint.
-- **Response shape (DEC-09).** `200 OK`, `application/json`, exactly `{ "url", "accessToken" }`. These two camelCase names are fixed by the SignalR protocol and are the only exception to the `snake_case` rule. Errors: `401`/`403` as for `GET /api/v1/demands`, safe `5xx`; all as `application/problem+json`.
+- **Response shape (DEC-09).** `200 OK`, `application/json`, exactly `{ "url", "accessToken" }`. These two camelCase names are fixed by the SignalR protocol and are an exception to the `snake_case` rule (the other is `ProblemDetails`, §5.2). Errors: `401`/`403` as for `GET /api/v1/demands`, safe `5xx`; all as `application/problem+json`.
 - The request has no body. The SignalR client appends `?negotiateVersion=1` and sends, besides `Authorization`, the headers `X-Requested-With` and `X-SignalR-User-Agent`; the CORS policy (§5.2) MUST allow them. The frontend creates the connection without credentials (`withCredentials: false`).
 
 ### 7.2 `demandUpdated` server-to-client event (ADOPTED — implemented after Sprint 1)
