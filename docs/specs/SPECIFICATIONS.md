@@ -1,15 +1,15 @@
 # KLESIA — Backend Functional & Technical Specification
 
 **Document ID:** KLESIA-BE-SPEC  
-**Version:** 1.5 (Sprint 1 / Lot 1 baseline, revised; database engine changed to Azure Database for MySQL, DEC-14; hosting changed to Azure Container Apps, DEC-15)  
+**Version:** 1.6 (Sprint 1 / Lot 1 baseline, revised; database engine changed to Azure Database for MySQL, DEC-14; hosting changed to Azure Container Apps, DEC-15; SignalR negotiation and the first notification moved into Sprint 1, DEC-16)  
 **Date:** 2026-11-12  
 **Status:** Implementation-ready for Sprint 1; future contracts recorded separately  
 **Language:** English  
 **Primary audience:** Backend engineers, database engineers, AI coding agents, QA and infrastructure engineers
 
-> **Purpose.** This document specifies the incremental implementation of the KLESIA backend. Sprint 1 delivers an authenticated, authorized read-only demand-list API and the relational database supporting that view. The SignalR negotiation and demand-creation (PDF upload) contracts are **adopted** jointly with the frontend **but are not Sprint 1 implementation work**. The machine-readable HTTP contract of all three endpoints is `contracts/openapi.yaml` (workspace root), the single source of truth: this document and the OpenAPI file MUST stay identical on every HTTP detail. Later sprints should extend this document rather than silently changing existing contracts.
+> **Purpose.** This document specifies the incremental implementation of the KLESIA backend. Sprint 1 delivers an authenticated, authorized read-only demand-list API and the relational database supporting that view. The SignalR negotiation endpoint and the *demand stored* notification are Sprint 1 work as well (DEC-16). The demand-creation (PDF upload) contract is **adopted** jointly with the frontend **but is not Sprint 1 implementation work**. The machine-readable HTTP contract of all three endpoints is `contracts/openapi.yaml` (workspace root), the single source of truth: this document and the OpenAPI file MUST stay identical on every HTTP detail. Later sprints should extend this document rather than silently changing existing contracts.
 
-> **Terminology.** "Sprint 1" in this document is the delivery called **Lot 1 (LOT1)** by the client. Demand creation (`POST /api/v1/demands`) and the SignalR negotiation are **not part of Lot 1**.
+> **Terminology.** "Sprint 1" in this document is the delivery called **Lot 1 (LOT1)** by the client. Demand creation (`POST /api/v1/demands`) is **not part of Lot 1**. The SignalR negotiation and the first of the two notifications (*demand stored*, §7.2) **are** part of Lot 1; the second notification (*extraction completed*, OCR) is not.
 
 ## 1. Normative language and scope
 
@@ -31,25 +31,27 @@
 | S1-AUTH-02 | Database allowlist authorization: only existing, active users can access the protected data. |
 | S1-API-01 | `GET /api/v1/demands`, returning the signed-in user's identity details and only their demands. |
 | S1-API-02 | Explicit, safe HTTP responses for authentication, authorization, database and other server errors. |
+| S1-RT-01 | `POST /api/v1/notifications/negotiate` (§7.1): Entra-protected negotiation of the Azure SignalR connection (Serverless mode, hub `demands`, `userId` = `oid`). |
+| S1-RT-02 | The notification publisher (§7.2): an `INotifier` port in `Application` and its Azure SignalR implementation in `Infrastructure`, sending `demandUpdated` to one user, for the notification **N-1 *demand stored***. Nothing calls it in production before Lot 2 (`POST /api/v1/demands`): it is delivered and tested on its own (NOT-05). |
 | S1-OPS-01 | Configuration, allowed frontend origins, reproducible local run/build instructions and verification tests. |
 | S1-OPS-02 | A production container image definition (`Dockerfile`, `.dockerignore`) for the API and committed deployment instructions and pipeline for Azure Container Apps (DEC-15, §6.3). The migrator is delivered separately (S1-DB-02) and is not part of the image. |
 
 ### 1.2 Explicitly OUT OF SCOPE for Sprint 1
 
-- `POST /api/v1/notifications/negotiate` and the Azure SignalR `demands` notification channel: **contract adopted in §7.1 and `contracts/openapi.yaml`, implementation deferred**.
-- `demandUpdated` publication and demand-status mutation: deferred; no status-changing HTTP endpoint is specified.
+- The notification **N-2 *extraction completed*** (OCR) and everything it needs (extraction worker, status mutation, write permission on `Demand.StatusId`): **not specified yet, see OPEN-09**.
+- Any production caller of the notifier: it is first called by `POST /api/v1/demands` in Lot 2 (N-1) and later by the extraction step (N-2). No status-changing HTTP endpoint is specified.
 - `POST /api/v1/demands` (demand creation with PDF upload, size/content validation and SharePoint storage): **contract adopted in §7.3 and `contracts/openapi.yaml`, implementation deferred; not part of Lot 1**.
 - Demand update, delete, status transitions (other than the initial `pending`), pagination, filtering or searching.
 - Provisioning new users via API; management of roles/users via API.
 - Additional business entities, audit-history tables, or user-role join tables.
-- Implementation of the two adopted non-Sprint-1 endpoints (negotiate, demand creation); see **OPEN-01**.
+- Implementation of the adopted non-Sprint-1 endpoint (demand creation); see **OPEN-01**.
 
 ### 1.3 Known gaps, decisions and conflict resolution
 
 | ID | Observation / decision | Handling |
 |---|---|---|
-| OPEN-01 | **Resolved.** The overall API has **three HTTP endpoints**, all with an adopted contract: `GET /api/v1/demands` (§5.1, Sprint 1), `POST /api/v1/notifications/negotiate` (§7.1) and `POST /api/v1/demands` (§7.3). The `demandUpdated` event is **not** HTTP. | The contract of all three is frozen in `contracts/openapi.yaml`. Only `GET /api/v1/demands` (plus `GET /health`) is implemented in Sprint 1; do not create placeholder routes for the other two. They are implemented in later sprints. |
-| OPEN-02 | The broad API description includes SignalR, while the final Sprint 1 statement limits functionality to the initial user/demand screen. | The final Sprint 1 restriction takes precedence for **implementation**. Implement the list route now; the SignalR negotiation contract is adopted (§7.1) and implemented later. |
+| OPEN-01 | **Resolved.** The overall API has **three HTTP endpoints**, all with an adopted contract: `GET /api/v1/demands` (§5.1, Sprint 1), `POST /api/v1/notifications/negotiate` (§7.1, Sprint 1 since DEC-16) and `POST /api/v1/demands` (§7.3, Lot 2). The `demandUpdated` event is **not** HTTP. | The contract of all three is frozen in `contracts/openapi.yaml`. `GET /api/v1/demands`, `POST /api/v1/notifications/negotiate` and `GET /health` are implemented in Sprint 1; do not create a placeholder route for `POST /api/v1/demands`, which is implemented in Lot 2. |
+| OPEN-02 | The broad API description includes SignalR, while the first Sprint 1 statement limited functionality to the initial user/demand screen. | **Resolved by DEC-16.** The client decided that the SignalR channel belongs to Lot 1: implement the list route, the negotiate route and the notifier now (§7). |
 | OPEN-03 | The precise delegated API scope name, Entra tenant ID and API application ID are absent. | Supplied through configuration (§6.1: `AzureAd:*`); never hard-coded. The API refuses to start while they are missing or still placeholders. |
 | OPEN-04 | **Resolved.** The only authorization rule for now is *own data only*: an authenticated, allowlisted, active user receives exclusively the demands whose `Demand.UserId` is their own `sec_User.Id`. | The role codes `admin`, `operational` and `guest` are confirmed as the real codes, but **no role grants or removes any access in Sprint 1**. Do not infer cross-user, administrator or role-based behavior. |
 | OPEN-05 | **Resolved.** The PDFs are stored in **SharePoint**. `Demand.BaeLink` holds the absolute HTTPS URL of the document in SharePoint. | The API returns that URL after validating that it is an absolute HTTPS URL. SharePoint permissions are the access gate: the browser opens the link with the user's own Entra single sign-on session, so no bearer header, no SAS-style signature and no anonymous link is involved. The links are **permanent** SharePoint URLs: no time-limited, signed or anonymous sharing links are used, and `IBaeLinkResolver` stays a pass-through. Changing this needs a separate decision (tenant sharing policy, Graph permissions). |
@@ -71,8 +73,10 @@
 | OPEN-06 | **Resolved.** How the uploaded BAE PDF reaches SharePoint. | Stated as an explicit requirement in **DEC-13**: copy into SharePoint, store the link in `Demand.BaeLink`. Only deployment settings remain (site, library, folder, permission grant); they are configuration, not an open question about the HTTP contract. Out of Lot 1. |
 | DEC-14 | Database engine: **Azure Database for MySQL** (replaces SQL Server / Azure SQL Database). | The customer's DSI requires **Azure Database for MySQL – Flexible Server, MySQL 8.4** (DB-15). Decided consequences: (1) **one database with prefixed tables** `sec_Role`, `sec_User`, `ref_Status`, `Demand`, because MySQL has no schemas inside a database (DB-02); (2) a **DbUp migrator** (`database/Klesia.Database`) replaces the `.sqlproj` / DACPAC / `SqlPackage` chain (§3.5); (3) **`MySqlConnector` 2.4.0** replaces `Microsoft.Data.SqlClient` (version 3.0.0 appeared on the day of this decision and is not adopted yet); (4) **passwordless access with Microsoft Entra**: the access token is the MySQL password (DEC-06); (5) `UserUniqueId` is `CHAR(36)` and `IsActive`/`IsInternal` are `TINYINT(1)`, each with a `CHECK` that keeps the old type guarantee; (6) collation `utf8mb4_0900_ai_ci` (DB-13); (7) `PK_`/`DF_` names are dropped from DB-06 because MySQL cannot name them. The HTTP contract, JSON, authorization rules and API behavior are **unchanged**; the SQL of the repositories is rewritten in MySQL dialect (backtick quoting, `LIMIT`, `LAST_INSERT_ID()`), an implementation detail of `Infrastructure`. |
 | DEC-15 | Hosting: **Azure Container Apps** (replaces Azure App Service, DEC-07). | The customer's DSI requires that the API be deployed in **Azure Container Apps**. The frontend stays on Azure Static Web Apps and the database on Azure Database for MySQL (DEC-14). Decided consequences: (1) the API is delivered as a **container image** built from a `Dockerfile` at the repository root (§6.3, HOST-01); (2) the container listens on plain **HTTP port 8080** and runs as a non-root user: **TLS ends at the Container Apps ingress**, never in Kestrel (HOST-02, HOST-03); (3) the ingress is the only entry point, so the API reads `X-Forwarded-For` / `X-Forwarded-Proto` (HOST-04); (4) the Container Apps **probes** replace the App Service health check, `GET /health` is unchanged (§5.3, HOST-05); (5) the identity is a **user-assigned managed identity** attached to the container app and selected with the environment variable `AZURE_CLIENT_ID` (DEC-06, HOST-06); (6) configuration comes from **environment variables** (`Section__Key`) and, if ever needed, Container Apps secrets, never from the image (HOST-07); (7) the API is **stateless** and logs to the console only, collected by Log Analytics (HOST-08, HOST-10); (8) the DbUp migrator is **not** part of the API image: the GitHub Actions pipeline runs it as a step before the new revision is deployed (HOST-12). The HTTP contract, JSON, authorization rules, database schema and the Clean Architecture of the code are **unchanged**. |
+| DEC-16 | Real-time notifications and Lot 1. | The client decided (2026-11-12) that the backend notifies the owner through Azure SignalR **at two moments**: **N-1** when a new demand has been stored in the database (the frontend then reloads its list with `GET /api/v1/demands`) and **N-2** when the OCR extraction of the PDF is finished and the demand status changes (the frontend reloads the same way). Both use the same event `demandUpdated` with no payload (§7.2). **Only N-1 is developed in Lot 1**, with the negotiate route it needs. Because `POST /api/v1/demands` is Lot 2, Lot 1 delivers the channel and a tested publisher but **no production caller** (NOT-05). N-2 is not specified yet (OPEN-09). |
 | OPEN-07 | **Open: to confirm with the customer's DSI.** Azure Database for MySQL deployment settings. | (a) MySQL version: 8.4 is the target (DB-15). (b) Server name, database `klesia`, region and network access (public access with firewall rules, or private access: the Container Apps environment must reach the server, see OPEN-08). (c) Entra authentication: an Entra administrator on the server, a **user-assigned** managed identity as server identity with the Microsoft Graph permissions (or *Directory Readers* role) granted by a Privileged Role Administrator, and the database users for the runtime and deployment principals. (d) The `lower_case_table_names` setting (DB-04). (e) TLS is mandatory: confirm the CA chain so `SslMode=VerifyFull` can be used. (f) Whether `aad_auth_only` is `ON`. Until confirmed none of this is hard-coded: it is configuration (§6.1). |
 | OPEN-08 | **Open: to confirm with the customer's DSI.** Azure Container Apps deployment settings. | (a) The Container Apps environment (type, region) and whether it is integrated in a virtual network. (b) The network path to MySQL (OPEN-07b): the outbound addresses of a Container Apps environment are not a stable firewall allowlist unless the environment sits in a virtual network with fixed egress, so private access is the preferred target. (c) Ingress exposure: external (the browser of the Static Web App calls the API) or behind another entry point, IP restrictions, custom domain and certificate. (d) The container registry (Azure Container Registry name; the managed identity pulls with `AcrPull`), image retention and tag policy. (e) Minimum and maximum replicas (a minimum of 0 means a cold start, whose first request also acquires the Entra token and opens the TLS connection to MySQL), CPU/memory size, the scaling rule and the probe thresholds. (f) The maximum request body size and the request timeout of the ingress (240 s documented) against `Upload:MaxPdfSizeMb`, before the upload sprint. (g) Who owns the infrastructure code (Bicep): the DSI's infrastructure contract or this repository, and the role assignments (`AcrPull`, `Sites.Selected`, SignalR). (h) The Log Analytics workspace and the telemetry backend (§6.2). (i) GitHub Actions to Azure authentication: an OpenID Connect federated credential on a deployment principal (no stored secret), environments and approvals. Until confirmed none of this is hard-coded: it is configuration or infrastructure code. |
+| OPEN-09 | **Open: N-2 *extraction completed* is not specified.** | The notification itself is technically simple: Azure SignalR Service in Serverless mode accepts a REST publish addressed to one user id from any process that holds the right identity, so the extraction step can call the same notifier once it has stored its result. What is missing is the extraction design: the OCR engine and where it runs (a worker inside or outside this API, a queue), the status transitions (`pending` to `ok` or `fail`), who may change `Demand.StatusId` (the runtime database identity is `SELECT` only today, §6.2, so a writer identity or permission is needed), retries, and the owner lookup (the worker reads the owner's `oid` from the database, never from the PDF). Specify these in a later sprint section; do not implement N-2 in Lot 1. |
 
 ## 2. System context and architectural boundaries
 
@@ -84,7 +88,7 @@ flowchart LR
     API -->|Validate JWT issuer, audience,\nsignature, lifetime, delegated scope| ENTRA
     API -->|Dapper: lookup active user by Entra oid\nRead owning user's demands| DB[(Azure Database for MySQL)]
     FE -->|Opens bae_link with the user's SSO session| SP[SharePoint documents]
-    API -.->|Later sprint: negotiate + targeted events| SR[Azure SignalR Service]
+    API -->|Sprint 1: negotiate, targeted demandUpdated events| SR[Azure SignalR Service]
 ```
 
 **Technology baseline:**
@@ -556,7 +560,7 @@ Backend settings are bound as strongly typed options and validated at startup: t
 | Frontend | `Cors:AllowedOrigins` — array of exact origins (`http://localhost:5173`, the deployed Static Web App URL). Validated at startup: no path, HTTPS required except loopback, `*` forbidden. Empty means no cross-origin access. |
 | Configuration sources | Precedence, lowest to highest: `appsettings.json` (empty values, tracked) → `appsettings.{Environment}.json` (placeholders, tracked) → `appsettings.Local.json` (personal values, **git-ignored**) → environment variables (`AzureAd__TenantId`, `Cors__AllowedOrigins__0`, `ConnectionStrings__KlesiaDb`); in Azure they are set on the container app (HOST-07). |
 | Logging | Log level, correlation id (`X-Correlation-Id`, generated when absent or unsafe), telemetry backend if already used. |
-| SignalR (adopted, implemented after Sprint 1) | SignalR endpoint/resource name, managed identity configuration and hub identifier `demands`; the Azure SignalR Service CORS origins equal `Cors:AllowedOrigins`. |
+| SignalR (Sprint 1, DEC-16) | SignalR endpoint/resource name, managed identity configuration and hub identifier `demands`; the Azure SignalR Service CORS origins equal `Cors:AllowedOrigins`. |
 | PDF upload (adopted, implemented after Sprint 1) | `Upload:MaxPdfSizeMb` — maximum PDF size in MB (1 MB = 1,048,576 bytes), provisionally `10`, identical to the webapp's `maxPdfSizeMb`; request-size limits (Kestrel, `FormOptions`) MUST be aligned to it; `SharePoint:SiteId`, `SharePoint:LibraryName` and `SharePoint:BaseFolder` (DEC-13); the managed identity needs `Sites.Selected` on that one site only. Nothing is needed in Sprint 1: SharePoint links are returned as stored. |
 
 Store credentials and connection secrets in environment-specific secret stores or managed identity configuration. Avoid checking credentials into `appsettings.json`, `.env` tracked files, Bicep parameter defaults, migrator connection strings, examples, log files or simulator artifacts.
@@ -591,11 +595,11 @@ The API runs as one **container app** with HTTP ingress in an Azure Container Ap
 
 **Running the image on a PC.** `docker run` with the same environment variables starts the API and answers `/health`, but `DefaultAzureCredential` has no Azure CLI inside the container, so database calls fail (`503`) unless a credential is injected. Day-to-day development therefore stays on `dotnet run` (`docs/local-development.md`); the container is verified in CI and in the dev environment (AT-33 to AT-36).
 
-## 7. Adopted contracts — implemented after Sprint 1
+## 7. Real-time notifications (Sprint 1) and adopted contracts (after Sprint 1)
 
-These contracts are **adopted** jointly with the frontend and are frozen in `contracts/openapi.yaml`. They are **not Sprint 1 deliverables**: do not implement them, and do not add placeholder routes, until their sprint starts. Together with `GET /api/v1/demands` they make up the complete HTTP surface of three endpoints (OPEN-01).
+Sections 7.1 and 7.2 (negotiate and the `demandUpdated` event) are **Sprint 1 deliverables** (DEC-16). Section 7.3 (`POST /api/v1/demands`) is **adopted** jointly with the frontend but is **not a Sprint 1 deliverable**: do not implement it, and do not add a placeholder route, until Lot 2 starts. All three are frozen in `contracts/openapi.yaml` and together make up the complete HTTP surface of three endpoints (OPEN-01).
 
-### 7.1 `POST /api/v1/notifications/negotiate` (ADOPTED — implemented after Sprint 1)
+### 7.1 `POST /api/v1/notifications/negotiate` (Sprint 1)
 
 ```http
 POST /api/v1/notifications/negotiate HTTP/1.1
@@ -622,7 +626,7 @@ Success: `200 OK`:
 - **Response shape (DEC-09).** `200 OK`, `application/json`, exactly `{ "url", "accessToken" }`. These two camelCase names are fixed by the SignalR protocol and are an exception to the `snake_case` rule (the other is `ProblemDetails`, §5.2). Errors: `401`/`403` as for `GET /api/v1/demands`, safe `5xx`; all as `application/problem+json`.
 - The request has no body. The SignalR client appends `?negotiateVersion=1` and sends, besides `Authorization`, the headers `X-Requested-With` and `X-SignalR-User-Agent`; the CORS policy (§5.2) MUST allow them. The frontend creates the connection without credentials (`withCredentials: false`).
 
-### 7.2 `demandUpdated` server-to-client event (ADOPTED — implemented after Sprint 1)
+### 7.2 `demandUpdated` event and the notification publisher (N-1 in Sprint 1)
 
 | Property | Contract |
 |---|---|
@@ -630,11 +634,22 @@ Success: `200 OK`:
 | Client method name | `demandUpdated` (case-sensitive) |
 | Payload | **No arguments**; any unexpected payload is ignored by the frontend |
 | Recipient | Owning user only, selected by stable Entra `oid` |
-| Trigger | Demand status change, and a newly created demand becoming visible (after `POST /api/v1/demands`) |
+| Trigger | Two notifications, same event: **N-1 *demand stored*** (a new demand row has been committed) and **N-2 *extraction completed*** (the OCR extraction finished and the demand status changed). See the catalogue below |
 | Delivery | At-most-once, best effort; no replay or durable event history |
 | Client recovery | Reload `GET /api/v1/demands` after (re)connection or receiving the event |
 
-Do **not** broadcast demand activity to all connections. Future status-update integrations must establish the correct owner from the database or trusted business event, never from an untrusted client-supplied owner claim. No producer or status mutation endpoint has been specified yet.
+| Id | Notification | When | Lot |
+|---|---|---|---|
+| N-1 | *demand stored* | After the commit of the `Demand` insert (§7.3 step 8) | Channel and publisher in Lot 1; first caller (`POST /api/v1/demands`) in Lot 2 |
+| N-2 | *extraction completed* | After the OCR result is stored and `Demand.StatusId` has changed | Not specified (OPEN-09) |
+
+Both send the same event with the same empty payload: the frontend reloads `GET /api/v1/demands` on every event and never reads the payload (webapp RT-03, BE-02). A distinct event name or a payload would be a contract change.
+
+- **NOT-01 Publisher port.** `Application` declares `INotifier` (one operation: tell the user identified by an Entra `oid` that their demands changed). `Infrastructure` implements it with the Azure SignalR Service REST API in Serverless mode (hub `demands`, user-targeted message, managed identity, no access key). Callers never see SignalR types.
+- **NOT-02 Recipient.** The `oid` given to the notifier is read from the database (`sec_User.UserUniqueId` of the demand's owner) or taken from the validated token of the request that created the demand, never from client input. The message goes to that user only; demand activity is **never broadcast**. Future status-update integrations must establish the owner from the database or a trusted business event.
+- **NOT-03 Best effort, after the commit.** The notifier is called only after the database change is committed. A failure (SignalR unavailable, timeout) is logged without user data and **never** changes the HTTP result or rolls the change back; the frontend recovers by reloading on every (re)connection. The call has a short timeout.
+- **NOT-04 No data.** No GK number, status or link is sent. Logs never contain an `oid` together with a GK number or a link.
+- **NOT-05 Lot 1 delivery.** Lot 1 delivers the negotiate route, the notifier and AT-31, AT-32, AT-37, AT-38. The notifier is registered in the container but nothing calls it yet: do not invent a caller or a trigger route; tests call it directly.
 
 ### 7.3 `POST /api/v1/demands` — create a demand with its BAE PDF (ADOPTED — implemented after Sprint 1)
 
@@ -662,7 +677,7 @@ There is **no `user_id` part** and none is read: the owner is always the user of
 5. Respond `201 Created` (DEC-10) with the created demand as JSON, shaped like a `demands[]` item of §5.1 (`demand_id`, `gk_number`, `bae_link`, `status: "pending"`). No `Location` header (no single-demand route exists).
 6. **Read-after-write:** the row is committed before `201` is sent, so the next `GET /api/v1/demands` already contains the demand.
 7. **Duplicates allowed (INT-09):** the same GK number or document may be submitted again; each call creates a new demand. The operation is not idempotent and the frontend never retries it automatically.
-8. After the commit the backend publishes `demandUpdated` to the owner (§7.2).
+8. After the commit the backend publishes `demandUpdated` to the owner (notification N-1 through `INotifier`, §7.2, NOT-01 to NOT-03).
 9. Never log the file name, file content, GK number or document URL.
 10. Request-size limits (Kestrel, the Container Apps ingress with its 240 s request timeout and its body-size limit to confirm in OPEN-08f, `FormOptions.MultipartBodyLengthLimit`) MUST be aligned with `Upload:MaxPdfSizeMb` plus multipart overhead, so that an oversized file yields `413` and not a transport error.
 
@@ -679,14 +694,14 @@ The database migrator location is required. The backend follows the Clean Archit
 ```text
 src/
   Domain/            Users/ApplicationUser, Demands/Demand, Demands/GKNumber
-  Application/       Abstractions/ (IUserRepository, IDemandRepository, IBaeLinkResolver)
+  Application/       Abstractions/ (IUserRepository, IDemandRepository, IBaeLinkResolver, INotifier)
                      Demands/ (DemandService, DemandDto, UserDemandsDto)
                      Common/Exceptions/ (ForbiddenException, NotFoundException)
   Infrastructure/    Persistence/ (IDbConnectionFactory, repositories written with Dapper)
-                     Documents/ (HttpsBaeLinkResolver)   Options/   DependencyInjection.cs
+                     Documents/ (HttpsBaeLinkResolver)   Notifications/ (AzureSignalRNotifier)   Options/   DependencyInjection.cs
   WebApi/            Authentication/ (Entra options, validation, scope policy)
                      Cors/   Logging/   Contracts/ (snake_case response records)
-                     Controllers/DemandsController   Infrastructure/GlobalExceptionHandler   Program.cs
+                     Controllers/DemandsController, NotificationsController   Infrastructure/GlobalExceptionHandler   Program.cs
 tests/
   UnitTests/         domain and application behavior (NSubstitute)
   IntegrationTests/  real HTTP pipeline with signed test tokens and in-memory repositories;
@@ -734,12 +749,14 @@ Keep token validation separate from business query logic. Avoid introducing unre
 | AT-28 | **(post-Sprint 1)** Body is not `multipart/form-data` | POST `/api/v1/demands` | `415` |
 | AT-29 | **(post-Sprint 1)** No token, missing scope, unknown or inactive user | POST `/api/v1/demands` | Same `401`/`403` policy as GET; nothing stored |
 | AT-30 | **(post-Sprint 1)** Same GK number submitted twice | POST `/api/v1/demands` | Both `201`; two distinct demands |
-| AT-31 | **(post-Sprint 1)** Active user, valid token | POST `/api/v1/notifications/negotiate` | `200` `{url, accessToken}`; SignalR `userId` = `oid` |
-| AT-32 | **(post-Sprint 1)** Preflight from an approved origin asking for `Authorization`, `X-Requested-With`, `X-SignalR-User-Agent` | OPTIONS negotiate | Allowed; no `Access-Control-Allow-Credentials`; unapproved origin gets no CORS grant |
+| AT-31 | Active user, valid token | POST `/api/v1/notifications/negotiate` | `200` `{url, accessToken}`; SignalR `userId` = `oid` |
+| AT-32 | Preflight from an approved origin asking for `Authorization`, `X-Requested-With`, `X-SignalR-User-Agent` | OPTIONS negotiate | Allowed; no `Access-Control-Allow-Credentials`; unapproved origin gets no CORS grant |
 | AT-33 | `docker build` from the repository root | build | Succeeds; the image runs as a non-root user and listens on `8080`; it holds no `appsettings.Local.json`, migrator, tests or secret (HOST-01, HOST-02) |
 | AT-34 | Container started with valid settings but MySQL unreachable | GET `/health` | `503` `{"status":"unavailable"}`; the process stays up and the TCP liveness check still succeeds (HOST-05) |
 | AT-35 | Request over plain HTTP carrying `X-Forwarded-Proto: https` and `X-Forwarded-For` (as the ingress sends it) | GET | No redirect loop; the request is treated as HTTPS and the client address is the rightmost forwarded value (HOST-04); integration test on the test host |
 | AT-36 | Deployed revision in the dev environment, user-assigned managed identity | GET `/health`, then `GET /api/v1/demands` with a valid token | `200` and `200`; the database is reached with the Entra token and no password (DEC-06, HOST-06); the pipeline ran the migrator before the revision was activated (HOST-12) |
+| AT-37 | Notifier called for an owner `oid` (SignalR REST client replaced by a test double) | `INotifier`, N-1 | One message: hub `demands`, method `demandUpdated`, no arguments, addressed to that `oid` only; no broadcast (NOT-01, NOT-02) |
+| AT-38 | SignalR REST client times out or answers `5xx` | `INotifier`, N-1 | The call returns to its caller without throwing, the failure is logged without user data, and the caller is not blocked beyond the short timeout (NOT-03) |
 
 **Definition of Done — Sprint 1**
 
@@ -757,13 +774,14 @@ Keep token validation separate from business query logic. Avoid introducing unre
 - [ ] The solution targets `net10.0`; AT-15, AT-16 and AT-17 are runnable against a disposable MySQL 8.4 database (`KLESIA_TEST_DB_CONNECTION`).
 - [ ] The API image builds from the root `Dockerfile`, runs non-root on port 8080, honours `X-Forwarded-*`, and AT-33, AT-34 and AT-35 pass (DEC-15).
 - [ ] Deployment to Azure Container Apps is documented (`docs/deployment-container-apps.md`), the GitHub Actions pipeline (migrator step, SHA-tagged image, health smoke test) is committed and AT-36 is run; the DSI items of OPEN-08 are answered or reported as unverified.
-- [ ] The adopted post-Sprint-1 routes (negotiate, `POST /api/v1/demands`) are **not presented as delivered**; the SharePoint settings of DEC-13 (site, library, folder, permission grant) remain to be confirmed before that sprint.
+- [ ] `POST /api/v1/notifications/negotiate` and the `INotifier` publisher are implemented, AT-31, AT-32, AT-37 and AT-38 pass, and the Azure SignalR resource, role assignment and CORS origins are configured or reported as unverified (DEC-16).
+- [ ] The adopted post-Sprint-1 route `POST /api/v1/demands` is **not presented as delivered**, the notifier has no production caller until then (NOT-05) and N-2 is not implemented (OPEN-09); the SharePoint settings of DEC-13 (site, library, folder, permission grant) remain to be confirmed before that sprint.
 
 ## 10. Implementation instructions for coding agents
 
 1. **Inspect before changing:** inspect the existing repository tree, the database migrator (`Migrations/`, `Seeds/`), current frontend integration contracts and infrastructure conventions. Do not overwrite initialized files unnecessarily.
-2. **Implement only Sprint 1:** deliver the database, `GET /api/v1/demands` (Entra access-token authentication and SQL allowlist authorization) and `GET /health`. Preserve, but do not implement, the adopted §7 contracts, and keep `contracts/openapi.yaml` identical to this document.
-3. **Avoid speculative features:** do not add any route beyond the three of `contracts/openapi.yaml` and `/health` (and, in Sprint 1, only `GET /api/v1/demands` and `/health`), a status mutation API, user-admin CRUD, role hierarchies, additional tables or SignalR stubs that return fake production data.
+2. **Implement only Sprint 1:** deliver the database, `GET /api/v1/demands` (Entra access-token authentication and SQL allowlist authorization) `POST /api/v1/notifications/negotiate`, the notifier (§7.1, §7.2) and `GET /health`. Preserve, but do not implement, the adopted §7.3 contract, and keep `contracts/openapi.yaml` identical to this document.
+3. **Avoid speculative features:** do not add any route beyond the three of `contracts/openapi.yaml` and `/health` (and, in Sprint 1, only `GET /api/v1/demands`, `POST /api/v1/notifications/negotiate` and `/health`), a status mutation API, user-admin CRUD, role hierarchies, additional tables or SignalR stubs that return fake production data.
 4. **Follow contracts verbatim:** preserve table names (with their `sec_`/`ref_` prefixes), the constraint-naming scheme of DB-06, JSON field names, HTTP statuses and identity mapping.
 5. **Dapper only (DEC-02):** do not add Entity Framework Core packages, a `DbContext`, entity configurations or migrations. Write parameterized **MySQL-dialect** SQL (not T-SQL) in `Infrastructure` repositories; schema changes go through a new, higher-numbered migration script (DB-14), never through an edit of an applied one.
 6. **Keep credentials external:** do not use illustrative server names/passwords as executable defaults, and do not include real Entra access tokens or real document URLs in tests/logs. Personal configuration goes into the git-ignored `appsettings.Local.json` or environment variables.

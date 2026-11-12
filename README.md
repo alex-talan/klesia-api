@@ -2,7 +2,7 @@
 
 Backend of the KLESIA application: secure REST APIs on **.NET 10**, **Azure Database for MySQL** (Flexible Server, MySQL 8.4) accessed with **Dapper**, authentication with **Microsoft Entra ID**, database-driven authorization and deployment as a container on **Azure Container Apps**. Development is incremental (Agile): the specification in [`docs/specs/SPECIFICATIONS.md`](docs/specs/SPECIFICATIONS.md) is delivered sprint by sprint.
 
-**Sprint 1:** `GET /api/v1/demands` returns the signed-in user's identity and only their own demands. Everything else in the specification (SignalR negotiation and `POST /api/v1/demands` with PDF upload, whose contracts are already adopted in `contracts/openapi.yaml`) is deferred to later sprints.
+**Sprint 1:** `GET /api/v1/demands` returns the signed-in user's identity and only their own demands. The SignalR negotiation (`POST /api/v1/notifications/negotiate`) and the notification publisher (notification *demand stored*, DEC-16) are in Sprint 1 too. `POST /api/v1/demands` with PDF upload (contract already adopted in `contracts/openapi.yaml`) and the OCR *extraction completed* notification are deferred to later sprints.
 
 ## Repository layout
 

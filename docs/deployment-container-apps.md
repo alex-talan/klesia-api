@@ -90,7 +90,7 @@ Thresholds, period and timeout are infrastructure settings (OPEN-08e).
 2. Set `AZURE_CLIENT_ID` to its client id.
 3. Create its MySQL user and grant `SELECT` as described in [`local-development.md`](local-development.md) section 2 (`CREATE AADUSER ... IDENTIFIED BY '<client id>'`). The Entra administrator and server identity prerequisites are in OPEN-07.
 4. If a registry is used, give the identity `AcrPull` on it (OPEN-08d).
-5. Later sprints add `Sites.Selected` (SharePoint, DEC-13) and the SignalR role (spec section 7.1).
+5. Sprint 1 adds the SignalR role (spec section 7.1, DEC-16); later sprints add `Sites.Selected` (SharePoint, DEC-13).
 
 ## 7. Delivery pipeline (HOST-12, GitHub Actions)
 
