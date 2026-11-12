@@ -11,7 +11,7 @@ Use this repository as a starter kit for building maintainable enterprise .NET s
 - Dapper over MySqlConnector for data access (no Entity Framework) against Azure Database for MySQL, and a DbUp migrator project (`database/Klesia.Database`) for the schema
 - Strong typing and nullable reference types
 - Structured logging and health checks
-- Azure-ready integration boundaries
+- Azure-ready integration boundaries and a container image for Azure Container Apps
 - High-quality automated tests
 
 ## Architecture Rules
@@ -56,8 +56,19 @@ Use this repository as a starter kit for building maintainable enterprise .NET s
 - Keep Azure SDK usage inside Infrastructure.
 - Prefer Managed Identity and Entra ID auth.
 - Never hardcode secrets.
-- Use Key Vault and App Configuration for production secret and configuration management.
+- Production settings are the container app's environment variables; use Key Vault (and App Configuration, if adopted) for any secret or centrally managed setting.
 - Keep cloud-specific details behind boundaries when business logic depends on them.
+
+## Hosting Rules (Azure Container Apps)
+
+- The API is deployed to Azure Container Apps (specification DEC-15, which supersedes the App Service hosting of DEC-07). Read `docs/specs/SPECIFICATIONS.md` section 6.3 (HOST-01 to HOST-12) before touching hosting, Docker or pipeline files.
+- Image: multi-stage `Dockerfile` at the repository root, non-root, plain HTTP on port 8080, no Kestrel HTTPS or certificate, no secret or `appsettings.Local.json` in the image, SHA tag (never `latest`).
+- TLS ends at the ingress: `UseForwardedHeaders` (`XForwardedFor`, `XForwardedProto`) first in the pipeline; the ingress CORS policy stays off and the API owns CORS.
+- Probes: startup and readiness on `GET /health`, liveness is TCP. Add no route for probes.
+- Stateless replicas, console logging only, configuration through `Section__Key` environment variables, user-assigned managed identity selected with `AZURE_CLIENT_ID`.
+- The DbUp migrator is not in the API image and never runs at startup: the GitHub Actions pipeline runs it before the new revision, so migrations stay backward compatible with the previous revision.
+- OPEN-08 items (environment, network to MySQL, ingress, registry, replicas, body-size limit) are not decided: never hard-code them and report dependent work as unverified.
+- Guidance: `.claude/skills/azure-container-apps/SKILL.md`.
 
 ## Testing Rules
 

@@ -49,8 +49,19 @@ This file is the Claude Code-specific instruction entrypoint. Cross-tool equival
 - Keep Azure SDK usage inside Infrastructure.
 - Prefer Managed Identity and Entra ID auth patterns.
 - Never hardcode secrets.
-- Use Key Vault and App Configuration for production configuration and secrets.
+- Production settings are the container app's environment variables; use Key Vault (and App Configuration, if adopted) for any secret or centrally managed setting. The API itself needs no secret.
 - Hide Azure-specific details behind interfaces when the application layer depends on them.
+
+### Hosting: Azure Container Apps (spec DEC-15, not App Service)
+- The API is deployed to **Azure Container Apps**. DEC-15 supersedes the App Service hosting of DEC-07. Read spec section 6.3 (HOST-01 to HOST-12) before touching a Dockerfile, a pipeline, Bicep or hosting-related startup code.
+- Image: multi-stage `Dockerfile` at the repository root, non-root user, plain HTTP on port `8080`, no Kestrel HTTPS or certificate, no secret, tenant value or `appsettings.Local.json` in the image (`.dockerignore`), tagged with the commit SHA (never `latest`).
+- TLS ends at the ingress: register `UseForwardedHeaders` (`XForwardedFor`, `XForwardedProto`) first in the pipeline. The ingress CORS policy stays disabled; the API owns CORS (spec section 5.2).
+- Probes: startup and readiness on `GET /health`, liveness is a TCP probe (a database outage must not restart replicas). Do not add routes for probes; `/health` stays anonymous and detail-free.
+- Stateless replicas: no file written to the container disk, no in-memory state that affects correctness, console logging only (Log Analytics collects it).
+- Identity and configuration: one user-assigned managed identity selected with the environment variable `AZURE_CLIENT_ID`; settings are environment variables in the `Section__Key` form. The API needs no secret.
+- The DbUp migrator is not in the API image and never runs at API startup: the GitHub Actions pipeline runs it before the new revision is deployed, so every migration must stay backward compatible with the previous revision.
+- The DSI settings listed in OPEN-08 (environment, network path to MySQL, ingress exposure, registry, replicas, body-size limit) are not decided yet: never hard-code them, and report anything that depends on them as unverified.
+- Use the `azure-container-apps` skill and the `devops-engineer` and `azure-engineer` agents for this work.
 
 ## 7. Testing Rules
 - Use xUnit, FluentAssertions, and NSubstitute consistently.
@@ -64,4 +75,5 @@ This file is the Claude Code-specific instruction entrypoint. Cross-tool equival
 - Review warnings, analyzer output, and architectural drift.
 - Confirm project references still point inward only.
 - Leave README and docs/specs/SPECIFICATIONS.md in sync with the code.
+- For container or pipeline changes run `docker build` when Docker is available; otherwise report the image as unverified. Never claim a deployment to Azure Container Apps was verified without having run it.
 - The authoritative requirements are in `docs/specs/SPECIFICATIONS.md`; change contracts there first.

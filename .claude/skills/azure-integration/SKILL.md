@@ -87,6 +87,8 @@ BlobServiceClient client = new(connectionStringFromSourceControl);
 
 Use secret-based local fallback only when necessary, and only through secure configuration sources.
 
+In Azure Container Apps (DEC-15) the API uses one **user-assigned** managed identity, selected with the environment variable `AZURE_CLIENT_ID` on the container app. See the `azure-container-apps` skill.
+
 ---
 
 ## Service-Specific Guidance

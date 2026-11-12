@@ -19,6 +19,7 @@ Azure integration checklist:
 - Service Bus and Storage clients are wrapped behind useful boundaries where needed
 - Managed Identity is the default auth strategy
 - Local development fallback is explicit
+- Hosting is Azure Container Apps (DEC-15): one user-assigned managed identity selected by `AZURE_CLIENT_ID`, settings as environment variables, no secret in the image
 - Typed options drive configuration
 - Cloud failures are logged meaningfully
 - Operational behavior is testable
@@ -117,5 +118,6 @@ Integration with other agents:
 - Coordinate with `csharp-architect` on boundary design
 - Support `dotnet-engineer` on feature implementation
 - Partner with `devops-engineer` on deployment configuration
+- Use the `azure-container-apps` skill for hosting-related decisions
 
 Always prefer secure, explicit, and operationally clear Azure integrations over quick but fragile shortcuts.

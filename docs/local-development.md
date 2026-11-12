@@ -76,7 +76,7 @@ Equivalent environment variables: `ConnectionStrings__KlesiaDb`, `AzureAd__Tenan
 | `AzureAd:RequiredScope` | Name of the delegated permission exposed by the API (e.g. `access_as_user`), not the full `api://…` URI. |
 | `Cors:AllowedOrigins` | Exact frontend origins: `http://localhost:5173` and your deployed Static Web App URL. |
 
-On the Azure App Service set the application setting `AZURE_CLIENT_ID` to the client id of the user-assigned managed identity, so `DefaultAzureCredential` picks it.
+On the Azure container app set the environment variable `AZURE_CLIENT_ID` to the client id of the user-assigned managed identity, so `DefaultAzureCredential` picks it (see [`deployment-container-apps.md`](deployment-container-apps.md)).
 
 In the API app registration set `requestedAccessTokenVersion` to `2` in the manifest, so tokens are issued by `…/v2.0`.
 
@@ -90,6 +90,8 @@ dotnet run --project src/WebApi --launch-profile https
 
 - API: `https://localhost:7180` (HTTP `http://localhost:5180`), health probe `GET /health`, OpenAPI document in Development.
 - Call `GET /api/v1/demands` with `Authorization: Bearer <access token for the API>`.
+
+Once the `Dockerfile` exists (S1-OPS-02), `docker build -t klesia-api .` and `docker run -p 8080:8080` with the environment variables above start the same API on `http://localhost:8080`. `GET /health` answers, but database calls fail with `503`: `DefaultAzureCredential` cannot use your `az login` session from inside a container. Keep using `dotnet run` for day-to-day work; the image is verified in CI and in the dev environment.
 
 ## 5. Build and apply the database migrations
 

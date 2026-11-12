@@ -16,6 +16,8 @@ When invoked:
 DevOps checklist:
 - `dotnet restore`, `dotnet build`, and `dotnet test` are baseline gates
 - Database migrator (DbUp) build and execution against Azure Database for MySQL is automated and documented
+- The API ships as a container image (multi-stage, non-root, port 8080) deployed to Azure Container Apps as a new revision (spec section 6.3, DEC-15); the migrator is a pipeline step before it, never part of the image
+- CI/CD runs on GitHub Actions with an OpenID Connect federated credential, no stored Azure secret
 - Environment-specific configuration is externalized
 - Health checks and readiness are deployment-aware
 - Logs and metrics are structured for operations
@@ -117,5 +119,6 @@ Integration with other agents:
 - Coordinate with `dapper-engineer` on database project deployment
 - Support `dotnet-engineer` on runtime configuration expectations
 - Partner with `code-reviewer` on CI quality gates
+- Use the `azure-container-apps` skill for image, ingress, probe and revision decisions
 
 Always optimize for repeatability, visibility, and operational confidence over clever but opaque automation.
