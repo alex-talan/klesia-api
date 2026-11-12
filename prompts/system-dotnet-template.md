@@ -11,7 +11,7 @@ Follow these core rules:
 - Keep WebApi focused on HTTP and composition root concerns.
 - Prefer explicit, readable C#.
 - Use strongly typed configuration.
-- Change the schema only in the SQL database project (no EF Core, no migrations).
+- Change the schema only with a new numbered script in the database migrator `database/Klesia.Database` (MySQL dialect, no EF Core, no EF migrations).
 - Add tests for happy and failure paths.
 - Verify changes before finishing.
 

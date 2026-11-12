@@ -22,7 +22,7 @@ Audit a .NET solution for boundary integrity, dependency direction, and long-ter
 | Inward dependency violation | Domain references Infrastructure or WebApi | Business logic becomes framework-coupled |
 | Thin abstraction with no value | Interface with one trivial implementation and no boundary role | Extra indirection with no payoff |
 | Fat controller | Controllers performing orchestration, validation, and persistence | Harder testing, duplicated behavior |
-| Infrastructure leakage | Azure SDK types, `SqlConnection` or SQL row types appear in Application | Vendor and persistence coupling |
+| Infrastructure leakage | Azure SDK types, `MySqlConnection` or SQL row types appear in Application | Vendor and persistence coupling |
 | Anemic boundary | Application layer just forwards calls without use-case logic | Layering exists on paper only |
 
 ---
@@ -71,7 +71,7 @@ public sealed class CreateOrderHandler(IDbConnection connection)
     {
         Guid id = Guid.NewGuid();
         await connection.ExecuteAsync(new CommandDefinition(
-            "INSERT INTO dbo.[Order] (Id, CustomerName) VALUES (@Id, @CustomerName)",
+            "INSERT INTO `Order` (Id, CustomerName) VALUES (@Id, @CustomerName)",
             new { Id = id, request.CustomerName },
             cancellationToken: cancellationToken));
         return id;
@@ -104,7 +104,7 @@ public async Task<IActionResult> CreateAsync(CreateOrderHttpRequest request, Can
 
     Order order = new(request.CustomerName.Trim());
     await connection.ExecuteAsync(new CommandDefinition(
-        "INSERT INTO dbo.[Order] (Id, CustomerName) VALUES (@Id, @CustomerName)",
+        "INSERT INTO `Order` (Id, CustomerName) VALUES (@Id, @CustomerName)",
         new { order.Id, order.CustomerName },
         cancellationToken: cancellationToken));
     return CreatedAtAction(nameof(GetAsync), new { id = order.Id }, order);
@@ -198,7 +198,7 @@ Suggested commands:
 
 ```bash
 rg "<ProjectReference" -g"*.csproj"
-rg "using Dapper|Microsoft\\.Data\\.SqlClient|Azure\\.|HttpContext|ControllerBase" src/Application src/Domain
+rg "using Dapper|MySqlConnector|Azure\\.|HttpContext|ControllerBase" src/Application src/Domain
 rg "using .*Infrastructure" src/Domain src/Application
-rg "SqlConnection|IDbConnection|BlobServiceClient|ServiceBusClient" src/Application src/Domain
+rg "MySqlConnection|IDbConnection|BlobServiceClient|ServiceBusClient" src/Application src/Domain
 ```

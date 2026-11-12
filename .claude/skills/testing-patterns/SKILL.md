@@ -80,8 +80,8 @@ public async Task CreateAsync_ShouldThrow_WhenCustomerNameIsMissing()
 Use integration tests for:
 - HTTP routing and serialization
 - Middleware and authentication behavior
-- Dapper query and row-mapping behavior (against a real SQL Server instance)
-- Constraints and persistence flows defined by the SQL database project
+- Dapper query and row-mapping behavior (against a real MySQL 8.4 instance)
+- Constraints and persistence flows defined by the database migrator scripts
 
 ```csharp
 [Fact]
@@ -142,6 +142,6 @@ Suggested commands:
 
 ```bash
 rg "\\[Fact\\]|\\[Theory\\]" tests
-rg "WebApplicationFactory|SqlConnection|Testcontainers|FluentAssertions|NSubstitute" tests
+rg "WebApplicationFactory|MySqlConnection|Testcontainers|FluentAssertions|NSubstitute" tests
 rg "throw new|Results\\.Problem|NotFound|BadRequest" src
 ```

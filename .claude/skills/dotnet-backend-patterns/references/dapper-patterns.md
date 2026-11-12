@@ -1,25 +1,25 @@
-# Dapper Patterns and Best Practices
+# Dapper Patterns and Best Practices (MySQL)
 
-Advanced patterns for data access with Dapper in .NET.
+Advanced patterns for data access with Dapper over **MySqlConnector** against **Azure Database for MySQL 8.4**.
 
-> The examples use generic names (`Products`, `Orders`). In Klesia, tables live in `database/Klesia.Database` (schemas `dbo`, `ref`, `sec`; keys named `{Table}Id`), so qualify names accordingly (for example `dbo.Demand`, `[sec].[User]`). See `assets/repository-template.cs` for a Klesia-shaped repository.
+> The examples are shaped like the Klesia schema: tables `sec_Role`, `sec_User`, `ref_Status` and `Demand` in one database (MySQL has no schemas inside a database), keys named `Id`, foreign keys `{ReferencedTable}Id`. The schema is owned by the DbUp migrator in `database/Klesia.Database`. See `assets/repository-template.cs` for a complete repository and the `mysql-database` skill for the dialect rules.
 
 ## Why Dapper?
 
-Klesia uses Dapper over `Microsoft.Data.SqlClient`. There is no ORM: the SQL database project (`database/Klesia.Database`) is the single owner of the schema, so there are no EF migrations, no `DbContext` and no change tracking.
+Klesia uses Dapper over `MySqlConnector`. There is no ORM: the migrator scripts (`database/Klesia.Database`) are the single owner of the schema, so there are no EF migrations, no `DbContext` and no change tracking.
 
 Dapper gives you:
 
-- Full control over the SQL (CTEs, window functions, hints)
+- Full control over the SQL (CTEs, window functions, index hints)
 - Predictable performance and a small abstraction surface
 - Explicit mapping between rows and DTOs/domain types
 - Easy parameterization (`@Name`) to prevent SQL injection
 
 You are responsible for:
 
-- Writing and reviewing the SQL by hand
+- Writing and reviewing the SQL by hand, **in the MySQL dialect** (never T-SQL)
 - Mapping joins and multiple result sets explicitly
-- Keeping column names and types aligned with the database project
+- Keeping column names and types aligned with the migration scripts
 - Managing transactions explicitly
 
 ## Connection Management
@@ -27,52 +27,75 @@ You are responsible for:
 ### 1. Proper Connection Handling
 
 ```csharp
-// Klesia convention: a factory over typed, validated options returns a SqlConnection.
-public interface ISqlConnectionFactory
+// Klesia convention: a factory returns a MySqlConnection from a pooled MySqlDataSource.
+public interface IDbConnectionFactory
 {
-    SqlConnection CreateConnection();
+    MySqlConnection CreateConnection();
 }
 
-internal sealed class SqlConnectionFactory(IOptions<SqlServerOptions> options) : ISqlConnectionFactory
+internal sealed class MySqlConnectionFactory : IDbConnectionFactory, IAsyncDisposable
 {
-    public SqlConnection CreateConnection() => new(options.Value.ConnectionString);
+    private static readonly string[] EntraScopes = ["https://ossrdbms-aad.database.windows.net/.default"];
+
+    private readonly MySqlDataSource dataSource;
+
+    public MySqlConnectionFactory(IOptions<DatabaseOptions> options, TokenCredential credential)
+    {
+        MySqlDataSourceBuilder builder = new(options.Value.ConnectionString);
+
+        // Passwordless (spec DEC-06): without a Password, a Microsoft Entra access token is the password.
+        if (string.IsNullOrEmpty(new MySqlConnectionStringBuilder(options.Value.ConnectionString).Password))
+        {
+            builder.UsePeriodicPasswordProvider(
+                async (_, cancellationToken) =>
+                {
+                    AccessToken token = await credential.GetTokenAsync(new TokenRequestContext(EntraScopes), cancellationToken);
+                    return token.Token;
+                },
+                successRefreshInterval: TimeSpan.FromMinutes(10),
+                failureRefreshInterval: TimeSpan.FromSeconds(5));
+        }
+
+        dataSource = builder.Build();
+    }
+
+    public MySqlConnection CreateConnection() => dataSource.CreateConnection();
+
+    public ValueTask DisposeAsync() => dataSource.DisposeAsync();
 }
 
 // Registration (Infrastructure/DependencyInjection.cs)
-services.AddOptions<SqlServerOptions>()
-    .Bind(configuration.GetSection(SqlServerOptions.SectionName))
+services.AddOptions<DatabaseOptions>()
+    .Configure<IConfiguration>((options, configuration) =>
+        options.ConnectionString = configuration.GetConnectionString("KlesiaDb") ?? string.Empty)
     .ValidateDataAnnotations()
     .ValidateOnStart();
-services.AddSingleton<ISqlConnectionFactory, SqlConnectionFactory>();
+services.AddSingleton<TokenCredential>(_ => new DefaultAzureCredential());
+services.AddSingleton<IDbConnectionFactory, MySqlConnectionFactory>();
 ```
 
-The connection string comes from configuration (user secrets locally, Key Vault / App Configuration in Azure) and uses `Authentication=Active Directory Default`. It is never hardcoded.
+The connection string comes from configuration (appsettings.Local.json, environment variables, Key Vault / App Configuration in Azure) and carries **no password**. It is never hardcoded. Entra tokens live 5 to 60 minutes, hence the periodic refresh well inside that window. One public report describes intermittent `Access denied` spikes with `UsePeriodicPasswordProvider` on another cloud (mysql-net/MySqlConnector issue 1456): if it shows up, check token expiry and the refresh interval first.
 
 ### 2. Connection Lifecycle
 
 ```csharp
-public class ProductRepository
+internal sealed class DemandRepository(IDbConnectionFactory connectionFactory)
 {
-    private readonly ISqlConnectionFactory _factory;
-
-    public ProductRepository(ISqlConnectionFactory factory)
+    public async Task<Demand?> FindAsync(int demandId, CancellationToken cancellationToken)
     {
-        _factory = factory;
-    }
+        // Dapper opens the connection when it is closed and closes it again; dispose it always.
+        await using MySqlConnection connection = connectionFactory.CreateConnection();
 
-    public async Task<Product?> GetByIdAsync(string id, CancellationToken ct)
-    {
-        // Connection opens automatically, closes on dispose
-        using var connection = _factory.CreateConnection();
-
-        return await connection.QueryFirstOrDefaultAsync<Product>(
+        return await connection.QueryFirstOrDefaultAsync<Demand>(
             new CommandDefinition(
-                "SELECT Id, Name, Sku, Price FROM Products WHERE Id = @Id",
-                new { Id = id },
-                cancellationToken: ct));
+                "SELECT Id AS DemandId, GKNumber, BaeLink FROM Demand WHERE Id = @DemandId",
+                new { DemandId = demandId },
+                cancellationToken: cancellationToken));
     }
 }
 ```
+
+**Open the connection yourself** whenever several statements must share one session: session state such as `LAST_INSERT_ID()` or user variables is lost when Dapper closes and the pool resets a connection between two calls.
 
 ## Query Patterns
 
@@ -80,455 +103,250 @@ public class ProductRepository
 
 ```csharp
 // SELECT single
-var product = await connection.QueryFirstOrDefaultAsync<Product>(
-    "SELECT Id, Name, Sku, Price FROM Products WHERE Id = @Id",
+Demand? demand = await connection.QueryFirstOrDefaultAsync<Demand>(
+    "SELECT Id AS DemandId, GKNumber, BaeLink FROM Demand WHERE Id = @Id",
     new { Id = id });
 
-// SELECT multiple
-var products = await connection.QueryAsync<Product>(
-    "SELECT * FROM Products WHERE CategoryId = @CategoryId",
-    new { CategoryId = categoryId });
+// SELECT multiple (explicit column list, never SELECT *)
+IEnumerable<Demand> demands = await connection.QueryAsync<Demand>(
+    "SELECT Id AS DemandId, GKNumber, BaeLink FROM Demand WHERE UserId = @UserId ORDER BY Id DESC",
+    new { UserId = userId });
 
-// INSERT with identity return
-var newId = await connection.QuerySingleAsync<int>(
-    """
-    INSERT INTO Products (Name, Price, CategoryId)
-    VALUES (@Name, @Price, @CategoryId);
-    SELECT CAST(SCOPE_IDENTITY() AS INT);
-    """,
-    product);
+// IN list: Dapper expands the collection, no table-valued parameter is needed (MySQL has none)
+IEnumerable<Demand> byIds = await connection.QueryAsync<Demand>(
+    "SELECT Id AS DemandId, GKNumber, BaeLink FROM Demand WHERE Id IN @Ids",
+    new { Ids = ids });
 
-// INSERT with OUTPUT clause (returns full entity)
-var inserted = await connection.QuerySingleAsync<Product>(
-    """
-    INSERT INTO Products (Name, Price, CategoryId)
-    OUTPUT INSERTED.*
-    VALUES (@Name, @Price, @CategoryId);
-    """,
-    product);
+// INSERT with identity return: MySQL has no OUTPUT / RETURNING.
+// LAST_INSERT_ID() is per connection, so open it explicitly and use the same connection twice.
+await connection.OpenAsync(cancellationToken);
+int inserted = await connection.ExecuteAsync(new CommandDefinition(
+    "INSERT INTO Demand (UserId, GKNumber, BaeLink, StatusId) VALUES (@UserId, @GKNumber, @BaeLink, @StatusId)",
+    demand,
+    cancellationToken: cancellationToken));
+int newId = await connection.ExecuteScalarAsync<int>(new CommandDefinition(
+    "SELECT LAST_INSERT_ID()",
+    cancellationToken: cancellationToken));
 
-// UPDATE
-var rowsAffected = await connection.ExecuteAsync(
-    """
-    UPDATE Products
-    SET Name = @Name, Price = @Price, UpdatedAt = @UpdatedAt
-    WHERE Id = @Id
-    """,
-    new { product.Id, product.Name, product.Price, UpdatedAt = DateTime.UtcNow });
+// UPDATE (affected rows = matched rows with MySqlConnector's default UseAffectedRows=false)
+int rowsAffected = await connection.ExecuteAsync(
+    "UPDATE Demand SET StatusId = @StatusId WHERE Id = @Id",
+    new { Id = id, StatusId = statusId });
 
-// DELETE
-await connection.ExecuteAsync(
-    "DELETE FROM Products WHERE Id = @Id",
-    new { Id = id });
+// DELETE (the schema has no cascade: delete children first, or the foreign key rejects the statement)
+await connection.ExecuteAsync("DELETE FROM Demand WHERE Id = @Id", new { Id = id });
 ```
 
 ### 4. Dynamic Query Building
 
+Only the *shape* of the SQL may vary, and only from fixed strings in code. Values always travel as parameters.
+
 ```csharp
-public async Task<IReadOnlyList<Product>> SearchAsync(ProductSearchCriteria criteria)
+public async Task<IReadOnlyList<Demand>> SearchAsync(DemandSearchCriteria criteria, CancellationToken cancellationToken)
 {
-    var sql = new StringBuilder("SELECT * FROM Products WHERE 1=1");
-    var parameters = new DynamicParameters();
+    StringBuilder sql = new("SELECT Id AS DemandId, GKNumber, BaeLink FROM Demand WHERE UserId = @UserId");
+    DynamicParameters parameters = new();
+    parameters.Add("UserId", criteria.UserId);
 
-    if (!string.IsNullOrWhiteSpace(criteria.SearchTerm))
+    if (criteria.StatusId.HasValue)
     {
-        sql.Append(" AND (Name LIKE @SearchTerm OR Sku LIKE @SearchTerm)");
-        parameters.Add("SearchTerm", $"%{criteria.SearchTerm}%");
+        sql.Append(" AND StatusId = @StatusId");
+        parameters.Add("StatusId", criteria.StatusId.Value);
     }
 
-    if (criteria.CategoryId.HasValue)
+    if (!string.IsNullOrWhiteSpace(criteria.GKNumberPrefix))
     {
-        sql.Append(" AND CategoryId = @CategoryId");
-        parameters.Add("CategoryId", criteria.CategoryId.Value);
+        sql.Append(" AND GKNumber LIKE @GKNumberPrefix");
+        parameters.Add("GKNumberPrefix", $"{criteria.GKNumberPrefix}%");
     }
 
-    if (criteria.MinPrice.HasValue)
-    {
-        sql.Append(" AND Price >= @MinPrice");
-        parameters.Add("MinPrice", criteria.MinPrice.Value);
-    }
-
-    if (criteria.MaxPrice.HasValue)
-    {
-        sql.Append(" AND Price <= @MaxPrice");
-        parameters.Add("MaxPrice", criteria.MaxPrice.Value);
-    }
-
-    // Pagination
-    sql.Append(" ORDER BY Name");
-    sql.Append(" OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY");
-    parameters.Add("Offset", (criteria.Page - 1) * criteria.PageSize);
+    // Pagination: LIMIT/OFFSET (not OFFSET ... FETCH NEXT)
+    sql.Append(" ORDER BY Id DESC LIMIT @PageSize OFFSET @Offset");
     parameters.Add("PageSize", criteria.PageSize);
+    parameters.Add("Offset", (criteria.Page - 1) * criteria.PageSize);
 
-    using var connection = _factory.CreateConnection();
-    var results = await connection.QueryAsync<Product>(sql.ToString(), parameters);
-    return results.ToList();
+    await using MySqlConnection connection = connectionFactory.CreateConnection();
+    IEnumerable<Demand> rows = await connection.QueryAsync<Demand>(
+        new CommandDefinition(sql.ToString(), parameters, cancellationToken: cancellationToken));
+    return rows.AsList();
 }
 ```
+
+Escape `%` and `_` in user text used inside `LIKE`. Sprint 1 returns the full demand list without pagination by specification.
 
 ### 5. Multi-Mapping (Joins)
 
 ```csharp
-// One-to-One mapping
-public async Task<Product?> GetProductWithCategoryAsync(string id)
-{
-    const string sql = """
-        SELECT p.*, c.*
-        FROM Products p
-        INNER JOIN Categories c ON p.CategoryId = c.Id
-        WHERE p.Id = @Id
-        """;
+// One-to-one: alias keys so the split column is explicit and unambiguous.
+const string sql = """
+    SELECT d.Id AS DemandId, d.GKNumber, d.BaeLink,
+           s.Id AS StatusId, s.Code, s.DisplayName
+    FROM Demand AS d
+    INNER JOIN ref_Status AS s ON s.Id = d.StatusId
+    WHERE d.Id = @DemandId
+    """;
 
-    using var connection = _factory.CreateConnection();
-
-    var result = await connection.QueryAsync<Product, Category, Product>(
-        sql,
-        (product, category) =>
-        {
-            product.Category = category;
-            return product;
-        },
-        new { Id = id },
-        splitOn: "Id");  // Column where split occurs
-
-    return result.FirstOrDefault();
-}
-
-// One-to-Many mapping
-public async Task<Order?> GetOrderWithItemsAsync(int orderId)
-{
-    const string sql = """
-        SELECT o.*, oi.*, p.*
-        FROM Orders o
-        LEFT JOIN OrderItems oi ON o.Id = oi.OrderId
-        LEFT JOIN Products p ON oi.ProductId = p.Id
-        WHERE o.Id = @OrderId
-        """;
-
-    var orderDictionary = new Dictionary<int, Order>();
-
-    using var connection = _factory.CreateConnection();
-
-    await connection.QueryAsync<Order, OrderItem, Product, Order>(
-        sql,
-        (order, item, product) =>
-        {
-            if (!orderDictionary.TryGetValue(order.Id, out var existingOrder))
-            {
-                existingOrder = order;
-                existingOrder.Items = new List<OrderItem>();
-                orderDictionary.Add(order.Id, existingOrder);
-            }
-
-            if (item != null)
-            {
-                item.Product = product;
-                existingOrder.Items.Add(item);
-            }
-
-            return existingOrder;
-        },
-        new { OrderId = orderId },
-        splitOn: "Id,Id");
-
-    return orderDictionary.Values.FirstOrDefault();
-}
+IEnumerable<DemandRow> result = await connection.QueryAsync<DemandRow, StatusRow, DemandRow>(
+    new CommandDefinition(sql, new { DemandId = demandId }, cancellationToken: cancellationToken),
+    (demand, status) => demand with { Status = status },
+    splitOn: "StatusId");
 ```
+
+For one-to-many, group in code with a dictionary keyed by the parent id (and `LEFT JOIN` when the children may be absent), exactly as in the usual Dapper pattern. Always list columns explicitly: `SELECT p.*, c.*` makes `splitOn` fragile.
 
 ### 6. Multiple Result Sets
 
 ```csharp
-public async Task<(IReadOnlyList<Product> Products, int TotalCount)> SearchWithCountAsync(
-    ProductSearchCriteria criteria)
-{
-    const string sql = """
-        -- First result set: count
-        SELECT COUNT(*) FROM Products WHERE CategoryId = @CategoryId;
+const string sql = """
+    SELECT COUNT(*) FROM Demand WHERE UserId = @UserId;
 
-        -- Second result set: data
-        SELECT * FROM Products
-        WHERE CategoryId = @CategoryId
-        ORDER BY Name
-        OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;
-        """;
+    SELECT Id AS DemandId, GKNumber, BaeLink
+    FROM Demand
+    WHERE UserId = @UserId
+    ORDER BY Id DESC
+    LIMIT @PageSize OFFSET @Offset;
+    """;
 
-    using var connection = _factory.CreateConnection();
-    using var multi = await connection.QueryMultipleAsync(sql, new
-    {
-        CategoryId = criteria.CategoryId,
-        Offset = (criteria.Page - 1) * criteria.PageSize,
-        PageSize = criteria.PageSize
-    });
+await using MySqlConnection connection = connectionFactory.CreateConnection();
+await using SqlMapper.GridReader grid = await connection.QueryMultipleAsync(
+    new CommandDefinition(sql, new { UserId = userId, PageSize = pageSize, Offset = offset }, cancellationToken: cancellationToken));
 
-    var totalCount = await multi.ReadSingleAsync<int>();
-    var products = (await multi.ReadAsync<Product>()).ToList();
-
-    return (products, totalCount);
-}
+int total = await grid.ReadSingleAsync<int>();
+List<Demand> page = (await grid.ReadAsync<Demand>()).AsList();
 ```
 
 ## Advanced Patterns
 
-### 7. Table-Valued Parameters (Bulk Operations)
+### 7. Stored Procedures
+
+Klesia does not use stored procedures (logic lives in C#, schema in migrations). If one is ever introduced it must be created by a migration script, called with `commandType: CommandType.StoredProcedure`, and documented in the specification first. Output parameters work through `DynamicParameters` with `ParameterDirection.Output`.
+
+### 8. Transactions
 
 ```csharp
-// SQL Server TVP for bulk operations
-public async Task<IReadOnlyList<Product>> GetByIdsAsync(IEnumerable<string> ids)
+public async Task CreateWithAuditAsync(Demand demand, CancellationToken cancellationToken)
 {
-    // Create DataTable matching TVP structure
-    var table = new DataTable();
-    table.Columns.Add("Id", typeof(string));
-
-    foreach (var id in ids)
-    {
-        table.Rows.Add(id);
-    }
-
-    using var connection = _factory.CreateConnection();
-
-    var results = await connection.QueryAsync<Product>(
-        "SELECT p.* FROM Products p INNER JOIN @Ids i ON p.Id = i.Id",
-        new { Ids = table.AsTableValuedParameter("dbo.StringIdList") });
-
-    return results.ToList();
-}
-
-// SQL to create the TVP type:
-// CREATE TYPE dbo.StringIdList AS TABLE (Id NVARCHAR(40));
-```
-
-### 8. Stored Procedures
-
-```csharp
-public async Task<IReadOnlyList<Product>> GetTopProductsAsync(int categoryId, int count)
-{
-    using var connection = _factory.CreateConnection();
-
-    var results = await connection.QueryAsync<Product>(
-        "dbo.GetTopProductsByCategory",
-        new { CategoryId = categoryId, TopN = count },
-        commandType: CommandType.StoredProcedure);
-
-    return results.ToList();
-}
-
-// With output parameters
-public async Task<(Order Order, string ConfirmationCode)> CreateOrderAsync(Order order)
-{
-    var parameters = new DynamicParameters(new
-    {
-        order.CustomerId,
-        order.Total
-    });
-    parameters.Add("OrderId", dbType: DbType.Int32, direction: ParameterDirection.Output);
-    parameters.Add("ConfirmationCode", dbType: DbType.String, size: 20, direction: ParameterDirection.Output);
-
-    using var connection = _factory.CreateConnection();
-
-    await connection.ExecuteAsync(
-        "dbo.CreateOrder",
-        parameters,
-        commandType: CommandType.StoredProcedure);
-
-    order.Id = parameters.Get<int>("OrderId");
-    var confirmationCode = parameters.Get<string>("ConfirmationCode");
-
-    return (order, confirmationCode);
-}
-```
-
-### 9. Transactions
-
-```csharp
-public async Task<Order> CreateOrderWithItemsAsync(Order order, List<OrderItem> items)
-{
-    using var connection = _factory.CreateConnection();
-    await connection.OpenAsync();
-
-    using var transaction = await connection.BeginTransactionAsync();
+    await using MySqlConnection connection = connectionFactory.CreateConnection();
+    await connection.OpenAsync(cancellationToken);
+    await using MySqlTransaction transaction = await connection.BeginTransactionAsync(cancellationToken);
 
     try
     {
-        // Insert order
-        order.Id = await connection.QuerySingleAsync<int>(
-            """
-            INSERT INTO Orders (CustomerId, Total, CreatedAt)
-            OUTPUT INSERTED.Id
-            VALUES (@CustomerId, @Total, @CreatedAt)
-            """,
-            order,
-            transaction);
+        await connection.ExecuteAsync(new CommandDefinition(
+            "INSERT INTO Demand (UserId, GKNumber, BaeLink, StatusId) VALUES (@UserId, @GKNumber, @BaeLink, @StatusId)",
+            demand,
+            transaction,
+            cancellationToken: cancellationToken));
 
-        // Insert items
-        foreach (var item in items)
-        {
-            item.OrderId = order.Id;
-        }
+        // ... further statements sharing the same transaction ...
 
-        await connection.ExecuteAsync(
-            """
-            INSERT INTO OrderItems (OrderId, ProductId, Quantity, UnitPrice)
-            VALUES (@OrderId, @ProductId, @Quantity, @UnitPrice)
-            """,
-            items,
-            transaction);
-
-        await transaction.CommitAsync();
-
-        order.Items = items;
-        return order;
+        await transaction.CommitAsync(cancellationToken);
     }
     catch
     {
-        await transaction.RollbackAsync();
+        await transaction.RollbackAsync(cancellationToken);
         throw;
     }
 }
 ```
 
-### 10. Custom Type Handlers
+Transactions cover **DML only**. MySQL DDL commits implicitly, which is why migration scripts hold one DDL object each.
+
+### 9. Custom Type Handlers
+
+MySqlConnector maps `CHAR(36)` to `Guid` (default `GuidFormat=Char36`) and `TINYINT(1)` to `bool`, so Klesia needs no handler for `UserUniqueId` or `IsActive`. A handler is only justified for a real custom mapping, for example JSON columns:
 
 ```csharp
-// Register custom type handler for JSON columns
-public class JsonTypeHandler<T> : SqlMapper.TypeHandler<T>
+public sealed class JsonTypeHandler<T> : SqlMapper.TypeHandler<T>
 {
-    public override T Parse(object value)
-    {
-        if (value is string json)
-        {
-            return JsonSerializer.Deserialize<T>(json)!;
-        }
-        return default!;
-    }
+    public override T Parse(object value) => JsonSerializer.Deserialize<T>((string)value)!;
 
-    public override void SetValue(IDbDataParameter parameter, T value)
+    public override void SetValue(IDbDataParameter parameter, T? value)
     {
         parameter.Value = JsonSerializer.Serialize(value);
         parameter.DbType = DbType.String;
     }
 }
 
-// Register at startup
-SqlMapper.AddTypeHandler(new JsonTypeHandler<ProductMetadata>());
-
-// Now you can query directly
-var product = await connection.QueryFirstAsync<Product>(
-    "SELECT Id, Name, Metadata FROM Products WHERE Id = @Id",
-    new { Id = id });
-// product.Metadata is automatically deserialized from JSON
+// Register once at startup
+SqlMapper.AddTypeHandler(new JsonTypeHandler<DemandMetadata>());
 ```
+
+## Error Translation
+
+Translate database errors in Infrastructure; do not leak `MySqlException` to Application.
+
+```csharp
+try
+{
+    // ... Dapper call ...
+}
+catch (MySqlException ex) when (ex.Number is 1062 or 1452 or 1451 or 3819 or 1048)
+{
+    // 1062 duplicate key, 1452 child row has no parent, 1451 parent row is referenced,
+    // 3819 check constraint violated, 1048 column cannot be null
+    throw new InvalidOperationException("The change violates a database constraint.", ex);
+}
+```
+
+Never put the SQL text, parameter values or the connection string in the translated message or in logs.
 
 ## Performance Tips
 
-### 11. Use CommandDefinition for Cancellation
+### 10. Use CommandDefinition for Cancellation
 
 ```csharp
-// Always use CommandDefinition for async operations
-var result = await connection.QueryAsync<Product>(
+IEnumerable<Demand> result = await connection.QueryAsync<Demand>(
     new CommandDefinition(
-        commandText: "SELECT * FROM Products WHERE CategoryId = @CategoryId",
-        parameters: new { CategoryId = categoryId },
-        cancellationToken: ct,
+        commandText: "SELECT Id AS DemandId, GKNumber, BaeLink FROM Demand WHERE UserId = @UserId ORDER BY Id DESC",
+        parameters: new { UserId = userId },
+        cancellationToken: cancellationToken,
         commandTimeout: 30));
 ```
 
-### 12. Buffered vs Unbuffered Queries
+### 11. Buffered vs Unbuffered Queries
 
 ```csharp
-// Buffered (default) - loads all results into memory
-var products = await connection.QueryAsync<Product>(sql);  // Returns list
+// Buffered (default): loads all rows into memory
+IEnumerable<Demand> all = await connection.QueryAsync<Demand>(sql, parameters);
 
-// Unbuffered - streams results (lower memory for large result sets)
-var products = await connection.QueryUnbufferedAsync<Product>(sql);  // Returns IAsyncEnumerable
-
-await foreach (var product in products)
+// Unbuffered: streams rows (lower memory for large result sets)
+await foreach (Demand demand in connection.QueryUnbufferedAsync<Demand>(sql, parameters))
 {
-    // Process one at a time
+    // process one at a time
 }
 ```
 
-### 13. Connection Pooling Settings
+### 12. Connection Pooling
 
-```json
-{
-  "ConnectionStrings": {
-    "Default": "Server=localhost;Database=MyDb;User Id=sa;Password=xxx;TrustServerCertificate=True;Min Pool Size=5;Max Pool Size=100;Connection Timeout=30;"
-  }
-}
-```
-
-## Common Patterns
-
-### Repository Base Class
-
-```csharp
-public abstract class DapperRepositoryBase<T> where T : class
-{
-    protected readonly ISqlConnectionFactory ConnectionFactory;
-    protected readonly ILogger Logger;
-    protected abstract string TableName { get; }
-
-    protected DapperRepositoryBase(ISqlConnectionFactory factory, ILogger logger)
-    {
-        ConnectionFactory = factory;
-        Logger = logger;
-    }
-
-    protected async Task<T?> GetByIdAsync<TId>(TId id, CancellationToken ct = default)
-    {
-        var sql = $"SELECT * FROM {TableName} WHERE Id = @Id";
-
-        using var connection = ConnectionFactory.CreateConnection();
-        return await connection.QueryFirstOrDefaultAsync<T>(
-            new CommandDefinition(sql, new { Id = id }, cancellationToken: ct));
-    }
-
-    protected async Task<IReadOnlyList<T>> GetAllAsync(CancellationToken ct = default)
-    {
-        var sql = $"SELECT * FROM {TableName}";
-
-        using var connection = ConnectionFactory.CreateConnection();
-        var results = await connection.QueryAsync<T>(
-            new CommandDefinition(sql, cancellationToken: ct));
-
-        return results.ToList();
-    }
-
-    protected async Task<int> ExecuteAsync(
-        string sql,
-        object? parameters = null,
-        CancellationToken ct = default)
-    {
-        using var connection = ConnectionFactory.CreateConnection();
-        return await connection.ExecuteAsync(
-            new CommandDefinition(sql, parameters, cancellationToken: ct));
-    }
-}
-```
+Pooling is on by default in MySqlConnector and is per `MySqlDataSource`, so keep one data source (the singleton factory above). Tune through the connection string only when measurement justifies it: `MinimumPoolSize`, `MaximumPoolSize`, `ConnectionTimeout`. Keep `SslMode=Required` (or stricter) against Azure.
 
 ## Anti-Patterns to Avoid
 
 ```csharp
-// ❌ Bad - SQL injection risk
-var sql = $"SELECT * FROM Products WHERE Name = '{userInput}'";
+// BAD: SQL injection risk
+string bad = $"SELECT Id FROM Demand WHERE GKNumber = '{userInput}'";
 
-// ✅ Good - Parameterized query
-var sql = "SELECT * FROM Products WHERE Name = @Name";
-await connection.QueryAsync<Product>(sql, new { Name = userInput });
+// GOOD: parameterized query
+const string good = "SELECT Id FROM Demand WHERE GKNumber = @GKNumber";
+await connection.QueryAsync<int>(good, new { GKNumber = userInput });
 
-// ❌ Bad - Not disposing connection
-var connection = new SqlConnection(connectionString);
-var result = await connection.QueryAsync<Product>(sql);
-// Connection leak!
+// BAD: not disposing the connection
+MySqlConnection leaked = factory.CreateConnection();
 
-// ✅ Good - Using statement
-using var connection = new SqlConnection(connectionString);
-var result = await connection.QueryAsync<Product>(sql);
+// GOOD: always dispose
+await using MySqlConnection connection = factory.CreateConnection();
 
-// ❌ Bad - Opening connection manually when not needed
-await connection.OpenAsync();  // Dapper does this automatically
-var result = await connection.QueryAsync<Product>(sql);
+// BAD: T-SQL on a MySQL database
+const string tsql = "SELECT TOP 10 * FROM [dbo].[Demand] ORDER BY Id DESC";
 
-// ✅ Good - Let Dapper manage connection
-var result = await connection.QueryAsync<Product>(sql);
+// GOOD: MySQL dialect, explicit columns
+const string mysql = "SELECT Id AS DemandId, GKNumber FROM Demand ORDER BY Id DESC LIMIT 10";
+
+// BAD: reading LAST_INSERT_ID() after Dapper closed the connection (a different pooled session may answer)
+await connection.ExecuteAsync(insertSql, demand);
+int wrong = await connection.ExecuteScalarAsync<int>("SELECT LAST_INSERT_ID()");
+
+// GOOD: OpenAsync first, so both statements run on the same session
+await connection.OpenAsync(cancellationToken);
 ```

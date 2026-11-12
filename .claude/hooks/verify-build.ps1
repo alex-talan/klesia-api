@@ -39,7 +39,7 @@ if ($dotnetChanged) {
 }
 
 if ($databaseChanged) {
-    Invoke-Step 'SQL project build' @('build', 'database/Klesia.Database/Klesia.Database.sqlproj', '-c', 'Debug', '--nologo', '-v', 'q')
+    Invoke-Step 'Database migrator build' @('build', 'database/Klesia.Database/Klesia.Database.csproj', '-c', 'Debug', '--nologo', '-v', 'q')
 }
 
 exit 0

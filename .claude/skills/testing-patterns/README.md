@@ -10,7 +10,7 @@ Use this skill to add or improve .NET tests using xUnit, FluentAssertions, NSubs
 
 - Adding unit tests for services or domain logic
 - Adding API integration tests
-- Testing Dapper repositories against SQL Server
+- Testing Dapper repositories against MySQL
 - Improving negative-path coverage
 
 ## Quick Reference
@@ -19,7 +19,7 @@ Use this skill to add or improve .NET tests using xUnit, FluentAssertions, NSubs
 |------------|----------|
 | Unit | Business logic and orchestration |
 | Integration | HTTP, middleware, serialization, persistence |
-| Persistence-focused | Dapper queries, row mapping, constraints (real SQL Server) |
+| Persistence-focused | Dapper queries, row mapping, constraints (real MySQL 8.4) |
 
 ## Review Checklist
 

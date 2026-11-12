@@ -1,11 +1,11 @@
 ---
 name: dotnet-backend-patterns
-description: Klesia .NET 10 backend patterns - Clean Architecture layering, Dapper repositories over Microsoft.Data.SqlClient with ISqlConnectionFactory, validated typed options, async with cancellation tokens, domain exceptions mapped to ProblemDetails, and xUnit + FluentAssertions + NSubstitute tests. Entity Framework Core is not used. Use when implementing or reviewing backend features, repositories, services, or tests.
+description: Klesia .NET 10 backend patterns - Clean Architecture layering, Dapper repositories over MySqlConnector (Azure Database for MySQL, Entra token authentication) with IDbConnectionFactory, validated typed options, async with cancellation tokens, domain exceptions mapped to ProblemDetails, and xUnit + FluentAssertions + NSubstitute tests. Entity Framework Core is not used. Use when implementing or reviewing backend features, repositories, services, or tests.
 ---
 
 # .NET Backend Patterns (Klesia)
 
-Patterns for the Klesia API: ASP.NET Core on `net10.0`, Clean Architecture, Dapper over Azure SQL, Microsoft Entra ID. The repository rules in `CLAUDE.md`, `AGENTS.md` and `docs/specs/SPECIFICATIONS.md` always win over this skill.
+Patterns for the Klesia API: ASP.NET Core on `net10.0`, Clean Architecture, Dapper over Azure Database for MySQL 8.4, Microsoft Entra ID. The repository rules in `CLAUDE.md`, `AGENTS.md` and `docs/specs/SPECIFICATIONS.md` always win over this skill.
 
 ## When to Use This Skill
 
@@ -15,15 +15,15 @@ Patterns for the Klesia API: ASP.NET Core on `net10.0`, Clean Architecture, Dapp
 - Mapping failures to HTTP responses
 - Writing unit and integration tests
 
-Related skills: `architecture-review` (boundaries), `api-contract-review` (HTTP contract), `security-audit` (auth and input), `azure-integration` (Azure SDKs, Managed Identity), `logging-patterns`, `testing-patterns`, `clean-code`.
+Related skills: `mysql-database` (MySQL dialect, schema, migrations, Entra database authentication), `architecture-review` (boundaries), `api-contract-review` (HTTP contract), `security-audit` (auth and input), `azure-integration` (Azure SDKs, Managed Identity), `logging-patterns`, `testing-patterns`, `clean-code`.
 
 ## Fixed Decisions
 
 | Topic | Rule |
 |-------|------|
 | Framework | `net10.0`, nullable enabled, warnings as errors (see `Directory.Build.props`) |
-| Data access | Dapper + `Microsoft.Data.SqlClient`. No EF Core, no `DbContext`, no EF migrations |
-| Schema | Owned by `database/Klesia.Database` (SQL project). Never change schema from application code |
+| Data access | Dapper + `MySqlConnector` against Azure Database for MySQL 8.4 (MySQL dialect, never T-SQL). No EF Core, no `DbContext`, no EF migrations |
+| Schema | Owned by the DbUp migrator scripts in `database/Klesia.Database` (`Migrations/`, `Seeds/`). Never change schema from application code |
 | Repositories | Interfaces in Application, implementations in Infrastructure, parameterized SQL only |
 | Errors | Domain/application exceptions mapped to `application/problem+json` by one exception handler |
 | Tests | xUnit, FluentAssertions, NSubstitute. Integration tests use in-memory repositories and signed test tokens |
@@ -44,8 +44,8 @@ src/
 │   ├── Common/Exceptions/       # NotFoundException, ForbiddenException
 │   └── Demands/                 # Services and DTOs per feature
 ├── Infrastructure/              # Dapper, Azure clients, external integrations
-│   ├── Options/                 # SqlServerOptions, AzureOptions
-│   ├── Persistence/             # ISqlConnectionFactory
+│   ├── Options/                 # DatabaseOptions, AzureOptions
+│   ├── Persistence/             # IDbConnectionFactory, MySqlConnectionFactory
 │   │   └── Repositories/        # Dapper repositories
 │   └── DependencyInjection.cs   # AddInfrastructure(...)
 └── WebApi/                      # Transport and composition root
@@ -57,7 +57,7 @@ src/
 tests/
 ├── UnitTests/
 └── IntegrationTests/
-database/Klesia.Database/        # Tables, schemas, seed scripts (dbo, ref, sec)
+database/Klesia.Database/        # DbUp migrator: Migrations/ (DDL) and Seeds/ (tables sec_*, ref_*, Demand)
 ```
 
 Dependencies point inward only: WebApi -> Infrastructure -> Application -> Domain.
@@ -74,12 +74,14 @@ public static class DependencyInjection
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        services.AddOptions<SqlServerOptions>()
-            .Bind(configuration.GetSection(SqlServerOptions.SectionName))
+        services.AddOptions<DatabaseOptions>()
+            .Configure(options =>
+                options.ConnectionString = configuration.GetConnectionString("KlesiaDb") ?? string.Empty)
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
-        services.AddSingleton<ISqlConnectionFactory, SqlConnectionFactory>();
+        services.AddSingleton<TokenCredential>(_ => new DefaultAzureCredential());
+        services.AddSingleton<IDbConnectionFactory, MySqlConnectionFactory>();
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IDemandRepository, DemandRepository>();
 
@@ -87,11 +89,10 @@ public static class DependencyInjection
     }
 }
 
-// Infrastructure/Options/SqlServerOptions.cs
-public sealed class SqlServerOptions
+// Infrastructure/Options/DatabaseOptions.cs
+// Bound from ConnectionStrings:KlesiaDb. The string carries NO password: the Entra access token is the password.
+public sealed class DatabaseOptions
 {
-    public const string SectionName = "SqlServer";
-
     [Required]
     public string ConnectionString { get; set; } = string.Empty;
 }
@@ -185,31 +186,29 @@ Read [references/dapper-patterns.md](references/dapper-patterns.md) for connecti
 
 ```csharp
 // Infrastructure/Persistence
-public interface ISqlConnectionFactory
+public interface IDbConnectionFactory
 {
-    SqlConnection CreateConnection();
+    MySqlConnection CreateConnection();
 }
 
-// Infrastructure/Persistence
-internal sealed class SqlConnectionFactory(IOptions<SqlServerOptions> options) : ISqlConnectionFactory
-{
-    public SqlConnection CreateConnection() => new(options.Value.ConnectionString);
-}
+// Infrastructure/Persistence: MySqlConnectionFactory builds one pooled MySqlDataSource and, when the connection
+// string has no Password, supplies a Microsoft Entra access token as the password (UsePeriodicPasswordProvider).
+// The full implementation is in references/dapper-patterns.md and assets/repository-template.cs.
 
 // Infrastructure/Persistence/Repositories
-internal sealed class DemandRepository(ISqlConnectionFactory connectionFactory) : IDemandRepository
+internal sealed class DemandRepository(IDbConnectionFactory connectionFactory) : IDemandRepository
 {
     public async Task<IReadOnlyList<Demand>> ListByUserAsync(int userId, CancellationToken cancellationToken)
     {
         const string sql = """
             SELECT d.Id AS DemandId, d.GKNumber, d.BaeLink, s.Code AS StatusCode
-            FROM dbo.Demand AS d
-            INNER JOIN ref.Status AS s ON s.Id = d.StatusId
+            FROM Demand AS d
+            INNER JOIN ref_Status AS s ON s.Id = d.StatusId
             WHERE d.UserId = @UserId
             ORDER BY d.Id DESC
             """;
 
-        await using SqlConnection connection = connectionFactory.CreateConnection();
+        await using MySqlConnection connection = connectionFactory.CreateConnection();
         IEnumerable<Demand> rows = await connection.QueryAsync<Demand>(
             new CommandDefinition(sql, new { UserId = userId }, cancellationToken: cancellationToken));
 
@@ -222,11 +221,12 @@ Conventions:
 - SQL lives in `const` raw string literals next to the method that runs it. Explicit column lists, no `SELECT *`.
 - Always parameterize (`@UserId`). Never concatenate or interpolate user input into SQL text.
 - Pass the token through `CommandDefinition`.
-- Schemas are `dbo`, `ref`, `sec`; primary keys are named `Id` and foreign keys `{ReferencedTable}Id`; alias keys to the domain names in `SELECT` (`d.Id AS DemandId`). Bracket reserved names (`[sec].[User]`).
+- MySQL has no schemas inside a database: tables are `sec_Role`, `sec_User`, `ref_Status` and `Demand`. Primary keys are named `Id` and foreign keys `{ReferencedTable}Id`; alias keys to the domain names in `SELECT` (`d.Id AS DemandId`). Quote reserved words with backticks. Write MySQL dialect only (`LIMIT`, `LAST_INSERT_ID()`), never T-SQL.
+- `MySqlConnection` maps `CHAR(36)` to `Guid` and `TINYINT(1)` to `bool`; read `LAST_INSERT_ID()` on the same, explicitly opened connection as the `INSERT`.
 - Bound read queries (paging or a natural key). Sprint 1 returns the full demand list by specification.
 - Map rows to Domain types or Application DTOs. Never return persistence shapes from controllers.
 - Open one short-lived connection per repository call. Use an explicit transaction only when several statements must succeed together.
-- Translate SQL errors (constraint violations, timeouts) in Infrastructure; do not leak `SqlException` to Application.
+- Translate SQL errors (constraint violations, timeouts) in Infrastructure; do not leak `MySqlException` to Application (duplicate key 1062, missing parent 1452, check violated 3819).
 
 ## Testing Patterns
 
@@ -320,7 +320,7 @@ public sealed class KlesiaWebApplicationFactory : WebApplicationFactory<Program>
 
 ### SQL Tests
 
-Constraints, mappings and queries are not covered by fakes. Run them against a real Azure SQL / SQL Server database created from the database project, gated by the environment variable `KLESIA_TEST_SQL_CONNECTION` (tests are skipped when it is not set).
+Constraints, mappings and queries are not covered by fakes. Run them against a real, disposable MySQL 8.4 database created by the migrator (`database/Klesia.Database`), gated by the environment variable `KLESIA_TEST_DB_CONNECTION` (tests are skipped when it is not set). Each test runs in a transaction that is rolled back.
 
 ## Best Practices
 
@@ -331,7 +331,7 @@ Constraints, mappings and queries are not covered by fakes. Run them against a r
 3. Pass `CancellationToken` through every I/O path
 4. Use Dapper with parameterized SQL in Infrastructure repositories
 5. Use DTOs for request and response payloads and `ProblemDetails` for failures
-6. Change the schema in `database/Klesia.Database` only
+6. Change the schema in `database/Klesia.Database` only, with a new numbered migration script
 7. Cover positive and negative paths in unit tests; test SQL against a real database
 8. Use `record` types for DTOs and immutable data
 
@@ -340,17 +340,18 @@ Constraints, mappings and queries are not covered by fakes. Run them against a r
 1. Don't add EF Core, a `DbContext`, or migrations
 2. Don't block on async (`.Result`, `.Wait()`) or use `async void`
 3. Don't concatenate or interpolate user input into SQL
-4. Don't put SQL, `SqlConnection` or Azure SDK types in Application or Domain
+4. Don't put SQL, `MySqlConnection` or Azure SDK types in Application or Domain
 5. Don't expose domain entities or SQL rows directly in the API
 6. Don't catch `Exception` without logging or rethrowing
 7. Don't hardcode secrets or configuration values
 8. Don't create `new HttpClient()` manually (use `IHttpClientFactory`)
+9. Don't write T-SQL (`TOP`, `[brackets]`, `OUTPUT`, `SCOPE_IDENTITY`, `MERGE`) or add `Microsoft.Data.SqlClient`: the database is MySQL
 
 ## Common Pitfalls
 
 - **N+1 queries**: use a join, multi-mapping or `QueryMultiple` instead of a query per row
-- **Connection leaks**: `await using` the connection from `ISqlConnectionFactory`
-- **Missing indexes**: check query plans; add indexes in the database project
+- **Connection leaks**: `await using` the connection from `IDbConnectionFactory`
+- **Missing indexes**: check query plans; add indexes with a new migration script
 - **Over-fetching**: select only the columns the DTO needs
 - **Silent null mapping**: column names and types must match the constructor or properties of the target type
 - **Timeouts**: configure command and HTTP client timeouts deliberately

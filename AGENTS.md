@@ -8,7 +8,7 @@ Use this repository as a starter kit for building maintainable enterprise .NET s
 
 - ASP.NET Core Web API
 - Clean Architecture
-- Dapper for data access (no Entity Framework) and a SQL database project for the schema
+- Dapper over MySqlConnector for data access (no Entity Framework) against Azure Database for MySQL, and a DbUp migrator project (`database/Klesia.Database`) for the schema
 - Strong typing and nullable reference types
 - Structured logging and health checks
 - Azure-ready integration boundaries
@@ -40,11 +40,14 @@ Use this repository as a starter kit for building maintainable enterprise .NET s
 - Use `ProblemDetails` or `ValidationProblemDetails` for failures.
 - Include health checks, OpenAPI, and structured logging.
 
-## Data Access Rules (Dapper, no EF)
+## Data Access Rules (Dapper, MySQL, no EF)
 
-- Do not add Entity Framework Core, a DbContext or EF migrations.
-- Schema changes go in the SQL database project `database/Klesia.Database`.
+- The database is Azure Database for MySQL (Flexible Server, MySQL 8.4), not SQL Server: write MySQL-dialect SQL, never T-SQL.
+- Do not add Entity Framework Core, a DbContext, EF migrations or Microsoft.Data.SqlClient. Use MySqlConnector.
+- Tables are `sec_Role`, `sec_User`, `ref_Status`, `Demand` in one database (MySQL has no schemas); see `docs/specs/SPECIFICATIONS.md` section 3.
+- Schema changes go in a NEW numbered script under `database/Klesia.Database/Migrations/` (never edit an applied one, one DDL object per script). Seeds in `Seeds/` must stay idempotent.
 - Write parameterized SQL in Infrastructure repositories.
+- Database access is passwordless: the Microsoft Entra access token is the MySQL password (no `Password` in the connection string).
 - Repository interfaces live in Application, implementations in Infrastructure.
 - Sprint 1 returns the full demand list without pagination (see `docs/specs/SPECIFICATIONS.md`).
 
@@ -61,7 +64,7 @@ Use this repository as a starter kit for building maintainable enterprise .NET s
 - Use xUnit, FluentAssertions, and NSubstitute consistently.
 - Add tests for both happy paths and failure paths.
 - Keep unit tests focused on business behavior.
-- Use integration tests for HTTP endpoints; SQL constraint tests run against a real database when `KLESIA_TEST_SQL_CONNECTION` is set.
+- Use integration tests for HTTP endpoints; database constraint tests run against a real, disposable MySQL 8.4 database when `KLESIA_TEST_DB_CONNECTION` is set.
 
 ## Verification Before Finish
 

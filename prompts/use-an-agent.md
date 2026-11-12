@@ -6,7 +6,7 @@ Use one when the task has a clear specialization, for example:
 
 - `dotnet-engineer` for normal ASP.NET Core implementation work
 - `csharp-architect` for structure and boundary decisions
-- `dapper-engineer` for Dapper repositories and SQL access
+- `dapper-engineer` for Dapper repositories and MySQL access
 - `azure-engineer` for Azure integrations
 - `security-engineer` for hardening and auth
 - `test-automator` for testing work

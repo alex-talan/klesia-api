@@ -10,7 +10,8 @@ Skills are reusable prompts that teach Claude Code how this repository expects m
 | [architecture-review](architecture-review/README.md) | Audit boundaries, project references, and dependency flow |
 | [design-patterns](design-patterns/README.md) | Apply patterns only when they simplify the design |
 | [api-contract-review](api-contract-review/README.md) | Review REST semantics, versioning, and response consistency |
-| [dotnet-backend-patterns](dotnet-backend-patterns/SKILL.md) | Klesia .NET 10 patterns: Dapper repositories with ISqlConnectionFactory, parameterized SQL, typed options, ProblemDetails error handling, and xUnit/NSubstitute tests (no EF Core) |
+| [dotnet-backend-patterns](dotnet-backend-patterns/SKILL.md) | Klesia .NET 10 patterns: Dapper repositories over MySqlConnector with IDbConnectionFactory, parameterized SQL, typed options, ProblemDetails error handling, and xUnit/NSubstitute tests (no EF Core) |
+| [mysql-database](mysql-database/SKILL.md) | Azure Database for MySQL 8.4: MySQL dialect rules (no T-SQL), table naming, DbUp migrations and idempotent seeds, Entra token authentication, constraint testing |
 | [azure-integration](azure-integration/README.md) | Add Azure services with Managed Identity and typed configuration |
 | [logging-patterns](logging-patterns/README.md) | Keep logs structured, correlated, and safe |
 | [testing-patterns](testing-patterns/README.md) | Produce readable xUnit coverage for positive and negative scenarios |

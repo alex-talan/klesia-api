@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Database migrator for Azure Database for MySQL (Flexible Server). It owns the schema: it embeds the
+    versioned scripts of Migrations/ (run once, journaled in the SchemaVersions table) and the idempotent
+    scripts of Seeds/ (run after every deployment).
+
+    This project is deliberately stand-alone: database/Directory.Build.props is empty, so the repository-root
+    settings (warnings as errors, central package management) do not apply and the versions are pinned here.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Klesia.Database</RootNamespace>
+    <AssemblyName>Klesia.Database</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Migrations\*.sql" />
+    <EmbeddedResource Include="Seeds\*.sql" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="dbup-mysql" Version="6.1.0" />
+    <PackageReference Include="MySqlConnector" Version="2.4.0" />
+    <PackageReference Include="Azure.Identity" Version="1.13.2" />
+  </ItemGroup>
+</Project>
