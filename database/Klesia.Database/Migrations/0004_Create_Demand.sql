@@ -1,7 +1,7 @@
 -- Demand: business data (the former dbo schema has no prefix). A GK number is NOT unique per demand.
 -- GK number: 'GK' + 6 digits (YYMMDD date) + '-' + 9 digits, 18 characters. The pattern is matched case-sensitively
 -- (match type c) and the length guard rejects anything that is not exactly 18 characters.
--- IX_Demand_UserId leads with the foreign-key column; its descending Id serves the API ordering (Id DESC).
+-- IX_Demand_UserId leads with the foreign-key column. Its descending Id serves the API ordering (Id DESC).
 -- No ON DELETE / ON UPDATE action: InnoDB's default (RESTRICT) behaves like SQL Server's NO ACTION.
 CREATE TABLE `Demand`
 (
