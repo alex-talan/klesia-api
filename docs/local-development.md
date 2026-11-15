@@ -24,9 +24,13 @@ mysql -h <server>.mysql.database.azure.com --user <entra admin name> --enable-cl
 Then create the database users. `CREATE AADUSER` creates the user but grants **no** permission, so grant what each principal needs:
 
 ```sql
--- Developer account: the API only reads (until POST /api/v1/demands ships, then add INSERT on Demand).
+-- Developer account: the runtime privileges of the API (spec section 6.2), no DDL.
 CREATE AADUSER 'your.name@talan.com';
 GRANT SELECT ON klesia.* TO 'your.name@talan.com'@'%';
+GRANT INSERT ON klesia.`Demand` TO 'your.name@talan.com'@'%';
+GRANT INSERT ON klesia.`DemandInformation` TO 'your.name@talan.com'@'%';
+GRANT INSERT ON klesia.`DemandFormula` TO 'your.name@talan.com'@'%';
+GRANT UPDATE (`StatusId`) ON klesia.`Demand` TO 'your.name@talan.com'@'%';
 
 -- Deployment principal (person or pipeline running the migrator).
 -- DROP and DELETE are deliberately not granted: the migrator only moves forward (DB-11).
@@ -42,9 +46,13 @@ The API running in Azure uses the **user-assigned managed identity** (Flexible S
 SET aad_auth_validate_oids_in_tenant = OFF;
 CREATE AADUSER 'klesia-api' IDENTIFIED BY '<client id of the user-assigned managed identity>';
 GRANT SELECT ON klesia.* TO 'klesia-api'@'%';
+GRANT INSERT ON klesia.`Demand` TO 'klesia-api'@'%';
+GRANT INSERT ON klesia.`DemandInformation` TO 'klesia-api'@'%';
+GRANT INSERT ON klesia.`DemandFormula` TO 'klesia-api'@'%';
+GRANT UPDATE (`StatusId`) ON klesia.`Demand` TO 'klesia-api'@'%';
 ```
 
-> The managed-identity statements and the `GRANT ... @'%'` form follow the general Azure Database for MySQL documentation and have **not** been run against your server. Check them against the current Microsoft documentation (links in the specification, §11) before relying on them.
+> The managed-identity statements and the `GRANT ... @'%'` form follow the general Azure Database for MySQL documentation and have **not** been run against your server. Check them against the current Microsoft documentation (links in the specification, §12) before relying on them.
 
 ## 3. Configure the API
 
@@ -91,7 +99,7 @@ dotnet run --project src/WebApi --launch-profile https
 - API: `https://localhost:7180` (HTTP `http://localhost:5180`), health probe `GET /health`, OpenAPI document in Development.
 - Call `GET /api/v1/demands` with `Authorization: Bearer <access token for the API>`.
 
-Once the `Dockerfile` exists (S1-OPS-02), `docker build -t klesia-api .` and `docker run -p 8080:8080` with the environment variables above start the same API on `http://localhost:8080`. `GET /health` answers, but database calls fail with `503`: `DefaultAzureCredential` cannot use your `az login` session from inside a container. Keep using `dotnet run` for day-to-day work; the image is verified in CI and in the dev environment.
+Once the `Dockerfile` exists (SC-OPS-02), `docker build -t klesia-api .` and `docker run -p 8080:8080` with the environment variables above start the same API on `http://localhost:8080`. `GET /health` answers, but database calls fail with `503`: `DefaultAzureCredential` cannot use your `az login` session from inside a container. Keep using `dotnet run` for day-to-day work; the image is verified in CI and in the dev environment.
 
 ## 5. Build and apply the database migrations
 

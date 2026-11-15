@@ -221,9 +221,9 @@ Conventions:
 - SQL lives in `const` raw string literals next to the method that runs it. Explicit column lists, no `SELECT *`.
 - Always parameterize (`@UserId`). Never concatenate or interpolate user input into SQL text.
 - Pass the token through `CommandDefinition`.
-- MySQL has no schemas inside a database: tables are `sec_Role`, `sec_User`, `ref_Status` and `Demand`. Primary keys are named `Id` and foreign keys `{ReferencedTable}Id`; alias keys to the domain names in `SELECT` (`d.Id AS DemandId`). Quote reserved words with backticks. Write MySQL dialect only (`LIMIT`, `LAST_INSERT_ID()`), never T-SQL.
+- MySQL has no schemas inside a database: tables are `sec_Role`, `sec_User`, `ref_Status`, `Demand`, `DemandInformation` and `DemandFormula`. Primary keys are named `Id` and foreign keys `{ReferencedTable}Id`; alias keys to the domain names in `SELECT` (`d.Id AS DemandId`). Quote reserved words with backticks. Write MySQL dialect only (`LIMIT`, `LAST_INSERT_ID()`), never T-SQL.
 - `MySqlConnection` maps `CHAR(36)` to `Guid` and `TINYINT(1)` to `bool`; read `LAST_INSERT_ID()` on the same, explicitly opened connection as the `INSERT`.
-- Bound read queries (paging or a natural key). Sprint 1 returns the full demand list by specification.
+- Bound read queries (paging or a natural key). The demand list is returned in full by specification.
 - Map rows to Domain types or Application DTOs. Never return persistence shapes from controllers.
 - Open one short-lived connection per repository call. Use an explicit transaction only when several statements must succeed together.
 - Translate SQL errors (constraint violations, timeouts) in Infrastructure; do not leak `MySqlException` to Application (duplicate key 1062, missing parent 1452, check violated 3819).

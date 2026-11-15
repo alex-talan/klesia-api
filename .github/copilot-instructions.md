@@ -24,7 +24,7 @@ This repository is the KLESIA backend: ASP.NET Core on .NET 10, Clean Architectu
 
 - Use Dapper over MySqlConnector with parameterized MySQL-dialect SQL (never T-SQL); do not add Entity Framework Core, a DbContext, EF migrations or Microsoft.Data.SqlClient.
 - The database migrator `database/Klesia.Database` (DbUp) owns the schema: add a new numbered script in `Migrations/`, never edit an applied one.
-- Tables are `sec_Role`, `sec_User`, `ref_Status`, `Demand` (MySQL has no schemas). Database access is passwordless (Entra token as password).
+- Tables are `sec_Role`, `sec_User`, `ref_Status`, `Demand`, `DemandInformation`, `DemandFormula` (MySQL has no schemas). Database access is passwordless (Entra token as password).
 - Repository interfaces live in Application; implementations live in Infrastructure.
 
 ## Hosting (Azure Container Apps, spec DEC-15)

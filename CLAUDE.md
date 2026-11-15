@@ -30,13 +30,13 @@ This file is the Claude Code-specific instruction entrypoint. Cross-tool equival
 ## 4. Data Access Rules (Dapper, MySQL, no EF)
 - The database is **Azure Database for MySQL (Flexible Server, MySQL 8.4)** (spec DEC-14), not SQL Server. Never write T-SQL: no `TOP`, `[brackets]`, `ISNULL`, `SCOPE_IDENTITY`, `OUTPUT`, `MERGE` or `GO`. Use the `mysql-database` skill for the dialect rules.
 - Persistence uses Dapper with MySqlConnector. Do NOT add Entity Framework Core, a DbContext or EF migrations, and do NOT add Microsoft.Data.SqlClient.
-- MySQL has no schemas inside a database: the tables are `sec_Role`, `sec_User`, `ref_Status` and `Demand` in the single database `klesia`. Quote identifiers with backticks in scripts and spell them exactly as in the spec.
+- MySQL has no schemas inside a database: the tables are `sec_Role`, `sec_User`, `ref_Status`, `Demand`, `DemandInformation` and `DemandFormula` in the single database `klesia`. Quote identifiers with backticks in scripts and spell them exactly as in the spec.
 - The database migrator (`database/Klesia.Database`, DbUp) is the only owner of the schema. Change the schema with a NEW numbered script in `Migrations/`; never edit a script that has been applied. One DDL object per script (MySQL DDL is not transactional).
 - Scripts in `Seeds/` run on every execution: keep them idempotent (`UPDATE` join plus `INSERT ... WHERE NOT EXISTS`); no `INSERT IGNORE`, no `ON DUPLICATE KEY UPDATE`. No semicolon inside SQL comments or literals (the DbUp splitter cuts on it).
 - Write parameterized MySQL SQL inside Infrastructure repositories; never concatenate user input into SQL.
 - Database access is passwordless: no `Password` in the connection string, the Microsoft Entra access token is the password (spec DEC-06).
 - Repository interfaces live in Application; implementations live in Infrastructure. `IDbConnectionFactory` returns a `MySqlConnection`.
-- Sprint 1 returns the full demand list without pagination (see docs/specs/SPECIFICATIONS.md).
+- The demand list is returned in full, without pagination (see docs/specs/SPECIFICATIONS.md).
 
 ## 5. API Rules
 - Keep controllers thin.

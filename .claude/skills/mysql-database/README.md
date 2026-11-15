@@ -18,7 +18,7 @@ The KLESIA database is **Azure Database for MySQL (Flexible Server, MySQL 8.4)**
 
 | Topic | Rule |
 |-------|------|
-| Tables | `sec_Role`, `sec_User`, `ref_Status`, `Demand` in one database (no schemas in MySQL) |
+| Tables | `sec_Role`, `sec_User`, `ref_Status`, `Demand`, `DemandInformation`, `DemandFormula` in one database (no schemas in MySQL) |
 | Schema owner | `database/Klesia.Database` (DbUp): `Migrations/` run once, `Seeds/` run every time |
 | Changing the schema | New numbered script, one DDL object per script, never edit an applied one |
 | Dialect | Backticks, `LIMIT`, `LAST_INSERT_ID()`. Never T-SQL |

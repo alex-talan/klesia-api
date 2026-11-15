@@ -67,7 +67,7 @@ app.UseForwardedHeaders(); // before HTTPS redirection, authentication, CORS and
 4. Deploy a new revision with the SHA-tagged image.
 5. Smoke test `GET /health`, keep the previous revision for rollback.
 
-Azure sign-in uses an OpenID Connect federated credential, never a stored client secret. The runtime identity keeps `SELECT` only.
+Azure sign-in uses an OpenID Connect federated credential, never a stored client secret. The runtime identity keeps only the data privileges of spec section 6.2 (no DDL).
 
 ## Common Mistakes
 
@@ -78,7 +78,7 @@ Azure sign-in uses an OpenID Connect federated credential, never a stored client
 | Liveness probe on `/health` | A MySQL outage restarts every replica and does not fix anything |
 | Ingress CORS enabled together with the API's CORS | Two policies that can disagree |
 | Writing uploads or caches to local disk | Replicas do not share a disk; the PDF goes to SharePoint (DEC-13) |
-| Running the migrator at API startup | The runtime identity has `SELECT` only; schema changes belong to the pipeline |
+| Running the migrator at API startup | The runtime identity has no DDL privilege; schema changes belong to the pipeline |
 | A migration that drops or renames a column in the same release | The previous revision still serves during the rollout and after a rollback |
 | App Service wording or settings (`WEBSITE_*`, application settings, App Service health check) | Replaced by DEC-15 |
 | `latest` tag or a secret baked into the image | Not reproducible, not safe |

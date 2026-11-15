@@ -2,7 +2,7 @@
 
 The customer's DSI requires that the API run in **Azure Container Apps**, not Azure App Service (specification **DEC-15**, which supersedes DEC-07). The normative requirements are in [`SPECIFICATIONS.md`](specs/SPECIFICATIONS.md) section 6.3 (HOST-01 to HOST-12); this guide explains how they fit together and what remains to decide.
 
-> **Status.** Nothing here has been run against a real Azure environment. The `Dockerfile`, the GitHub Actions workflow and any Bicep do not exist yet (S1-OPS-02, created in the implementation sprint). The settings of the customer's environment are still open: see **OPEN-08** in the specification.
+> **Status.** Nothing here has been run against a real Azure environment. The `Dockerfile`, the GitHub Actions workflow and any Bicep do not exist yet (SC-OPS-02, still to be written). The settings of the customer's environment are still open: see **OPEN-08** in the specification.
 
 ## 1. Target topology
 
@@ -88,13 +88,13 @@ Thresholds, period and timeout are infrastructure settings (OPEN-08e).
 
 1. Create one user-assigned managed identity and attach it to the container app.
 2. Set `AZURE_CLIENT_ID` to its client id.
-3. Create its MySQL user and grant `SELECT` as described in [`local-development.md`](local-development.md) section 2 (`CREATE AADUSER ... IDENTIFIED BY '<client id>'`). The Entra administrator and server identity prerequisites are in OPEN-07.
+3. Create its MySQL user and grant the runtime privileges (`SELECT`, `INSERT` and the column-level `UPDATE`, spec section 6.2) as described in [`local-development.md`](local-development.md) section 2 (`CREATE AADUSER ... IDENTIFIED BY '<client id>'`). The Entra administrator and server identity prerequisites are in OPEN-07.
 4. If a registry is used, give the identity `AcrPull` on it (OPEN-08d).
-5. Sprint 1 adds the SignalR role (spec section 7.1, DEC-16); later sprints add `Sites.Selected` (SharePoint, DEC-13).
+5. Grant the identity the SignalR role (spec section 8.1, DEC-16), `Sites.Selected` on the SharePoint site (DEC-13) and *Cognitive Services User* on the Document Intelligence resource (DEC-18).
 
 ## 7. Delivery pipeline (HOST-12, GitHub Actions)
 
-Outline for the workflow to be written in the implementation sprint:
+Outline for the workflow still to be written:
 
 1. **Build and test:** `dotnet restore`, `dotnet build`, `dotnet test` (database constraint tests only when a disposable MySQL 8.4 is provided).
 2. **Image:** `docker build`, tag with the commit SHA, push to the registry.
@@ -113,8 +113,8 @@ Azure sign-in uses an OpenID Connect federated credential on the deployment prin
 - Network path to MySQL: public access with firewall rules is not workable with unstable outbound addresses, so private access is preferred.
 - Ingress: external or internal, IP restrictions, custom domain and certificate.
 - Container registry, authentication and retention.
-- Minimum and maximum replicas, CPU and memory, scaling rule, probe thresholds.
-- Ingress body-size limit against `Upload:MaxPdfSizeMb` (before the upload sprint).
+- Minimum and maximum replicas (at least 1 because of the background extraction, OPEN-10), CPU and memory, scaling rule, probe thresholds.
+- Ingress body-size limit against `Upload:MaxPdfSizeMb` (before production).
 - Who owns the infrastructure code (Bicep) and the role assignments.
 - Log Analytics workspace and telemetry backend.
 - GitHub to Azure authentication and approvals.

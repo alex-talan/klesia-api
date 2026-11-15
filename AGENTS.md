@@ -44,12 +44,12 @@ Use this repository as a starter kit for building maintainable enterprise .NET s
 
 - The database is Azure Database for MySQL (Flexible Server, MySQL 8.4), not SQL Server: write MySQL-dialect SQL, never T-SQL.
 - Do not add Entity Framework Core, a DbContext, EF migrations or Microsoft.Data.SqlClient. Use MySqlConnector.
-- Tables are `sec_Role`, `sec_User`, `ref_Status`, `Demand` in one database (MySQL has no schemas); see `docs/specs/SPECIFICATIONS.md` section 3.
+- Tables are `sec_Role`, `sec_User`, `ref_Status`, `Demand`, `DemandInformation`, `DemandFormula` in one database (MySQL has no schemas); see `docs/specs/SPECIFICATIONS.md` section 3.
 - Schema changes go in a NEW numbered script under `database/Klesia.Database/Migrations/` (never edit an applied one, one DDL object per script). Seeds in `Seeds/` must stay idempotent.
 - Write parameterized SQL in Infrastructure repositories.
 - Database access is passwordless: the Microsoft Entra access token is the MySQL password (no `Password` in the connection string).
 - Repository interfaces live in Application, implementations in Infrastructure.
-- Sprint 1 returns the full demand list without pagination (see `docs/specs/SPECIFICATIONS.md`).
+- The demand list is returned in full, without pagination (see `docs/specs/SPECIFICATIONS.md`).
 
 ## Azure Rules
 

@@ -1,8 +1,8 @@
 # KLESIA API
 
-Backend of the KLESIA application: secure REST APIs on **.NET 10**, **Azure Database for MySQL** (Flexible Server, MySQL 8.4) accessed with **Dapper**, authentication with **Microsoft Entra ID**, database-driven authorization and deployment as a container on **Azure Container Apps**. Development is incremental (Agile): the specification in [`docs/specs/SPECIFICATIONS.md`](docs/specs/SPECIFICATIONS.md) is delivered sprint by sprint.
+Backend of the KLESIA application: secure REST APIs on **.NET 10**, **Azure Database for MySQL** (Flexible Server, MySQL 8.4) accessed with **Dapper**, authentication with **Microsoft Entra ID**, database-driven authorization and deployment as a container on **Azure Container Apps**. The specification in [`docs/specs/SPECIFICATIONS.md`](docs/specs/SPECIFICATIONS.md) describes the whole application.
 
-**Sprint 1:** `GET /api/v1/demands` returns the signed-in user's identity and only their own demands. The SignalR negotiation (`POST /api/v1/notifications/negotiate`) and the notification publisher (notification *demand stored*, DEC-16) are in Sprint 1 too. `POST /api/v1/demands` with PDF upload (contract already adopted in `contracts/openapi.yaml`) and the OCR *extraction completed* notification are deferred to later sprints.
+**What it does:** `GET /api/v1/demands` returns the signed-in user's identity and only their own demands. `POST /api/v1/demands` copies a BAE PDF into SharePoint, stores the demand as `pending` and answers `201`. In the background the PDF is analyzed by Azure Document Intelligence, the extracted information is stored (`DemandInformation`, `DemandFormula`) and the demand becomes `ok` or `fail`. The owner is notified through Azure SignalR (`POST /api/v1/notifications/negotiate`) when the demand is stored and when the extraction is finished. The extracted data is not exposed by the API.
 
 ## Repository layout
 
@@ -14,7 +14,7 @@ Backend of the KLESIA application: secure REST APIs on **.NET 10**, **Azure Data
 ├── src/
 │   ├── Domain                   ApplicationUser, Demand, GKNumber
 │   ├── Application              use cases (DemandService), DTOs, repository abstractions
-│   ├── Infrastructure           Dapper repositories, MySQL connection, SharePoint link resolver
+│   ├── Infrastructure           Dapper repositories, MySQL connection, SharePoint, Document Intelligence and SignalR adapters, extraction worker
 │   └── WebApi                   controllers, Entra authentication, CORS, logging, composition root
 ├── tests/
 │   ├── UnitTests
@@ -28,11 +28,12 @@ Dependencies point inward only: `WebApi → Infrastructure → Application → D
 ## Key decisions
 
 - **No Entity Framework.** Data access is Dapper over MySqlConnector with parameterized MySQL-dialect SQL; the migration scripts in `database/Klesia.Database` are the only owner of the schema.
-- **Azure Database for MySQL** (DEC-14): one database `klesia` with the tables `sec_Role`, `sec_User`, `ref_Status`, `Demand` (MySQL has no schemas inside a database). Access is passwordless: a Microsoft Entra access token is the MySQL password.
+- **Azure Database for MySQL** (DEC-14): one database `klesia` with the tables `sec_Role`, `sec_User`, `ref_Status`, `Demand`, `DemandInformation`, `DemandFormula` (MySQL has no schemas inside a database). Access is passwordless: a Microsoft Entra access token is the MySQL password.
 - **.NET 10** (`global.json` pins the SDK).
 - **Azure Container Apps** (DEC-15, replacing App Service): the API ships as a container image (plain HTTP on port 8080, non-root, TLS at the ingress, user-assigned managed identity, configuration by environment variables). The DbUp migrator runs as a pipeline step, not inside the image. See [`docs/deployment-container-apps.md`](docs/deployment-container-apps.md).
 - **Authorization rule:** only active users present in `sec_User` are served, and only their own demands.
 - **PDF links** are SharePoint URLs returned as stored (validated as HTTPS); SharePoint permissions protect the documents.
+- **Extraction in the background** (DEC-17, DEC-18): after the `201`, a worker reads the PDF back from SharePoint, sends it to Azure Document Intelligence (endpoint and model id are configuration), validates the answer and stores it in one transaction. SharePoint location and account are configuration too.
 - **Configuration, not code:** tenant, API client id, scope, CORS origins and the database connection string come from configuration files or environment variables.
 
 ## Getting started

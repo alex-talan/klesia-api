@@ -2,7 +2,7 @@
 
 Advanced patterns for data access with Dapper over **MySqlConnector** against **Azure Database for MySQL 8.4**.
 
-> The examples are shaped like the Klesia schema: tables `sec_Role`, `sec_User`, `ref_Status` and `Demand` in one database (MySQL has no schemas inside a database), keys named `Id`, foreign keys `{ReferencedTable}Id`. The schema is owned by the DbUp migrator in `database/Klesia.Database`. See `assets/repository-template.cs` for a complete repository and the `mysql-database` skill for the dialect rules.
+> The examples are shaped like the Klesia schema: tables `sec_Role`, `sec_User`, `ref_Status`, `Demand`, `DemandInformation` and `DemandFormula` in one database (MySQL has no schemas inside a database), keys named `Id`, foreign keys `{ReferencedTable}Id`. The schema is owned by the DbUp migrator in `database/Klesia.Database`. See `assets/repository-template.cs` for a complete repository and the `mysql-database` skill for the dialect rules.
 
 ## Why Dapper?
 
@@ -172,7 +172,7 @@ public async Task<IReadOnlyList<Demand>> SearchAsync(DemandSearchCriteria criter
 }
 ```
 
-Escape `%` and `_` in user text used inside `LIKE`. Sprint 1 returns the full demand list without pagination by specification.
+Escape `%` and `_` in user text used inside `LIKE`. The demand list is returned in full, without pagination, by specification.
 
 ### 5. Multi-Mapping (Joins)
 

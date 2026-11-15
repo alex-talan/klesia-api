@@ -23,7 +23,7 @@ Related skills: `dotnet-backend-patterns` (Dapper repositories, DI, tests), `azu
 |-------|------|
 | Engine | Azure Database for MySQL Flexible Server, MySQL **8.4**. 8.0 is not targeted (standard support ends 2027-01-31). `CHECK` needs 8.0.16+ |
 | Driver | `MySqlConnector` 2.4.0 with Dapper. No `Microsoft.Data.SqlClient`, no Oracle `MySql.Data`, no EF Core |
-| Database layout | One database `klesia`. **No schemas**: tables are `sec_Role`, `sec_User`, `ref_Status`, `Demand` (`sec_`/`ref_` prefixes, business tables unprefixed) |
+| Database layout | One database `klesia`. **No schemas**: tables are `sec_Role`, `sec_User`, `ref_Status`, `Demand`, `DemandInformation`, `DemandFormula` (`sec_`/`ref_` prefixes, business tables unprefixed) |
 | Schema owner | The DbUp migrator `database/Klesia.Database`: `Migrations/` (run once, journaled in `SchemaVersions`) and `Seeds/` (run every time) |
 | Engine/charset | InnoDB, `utf8mb4`, `utf8mb4_0900_ai_ci`, declared on every table |
 | Types | `INT AUTO_INCREMENT` keys, `VARCHAR(n)` text, `CHAR(36)` GUID (lower-case canonical), `TINYINT(1)` flags, `CHAR(18)` GK number |
