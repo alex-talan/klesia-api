@@ -1,9 +1,10 @@
 # KLESIA — Backend Functional & Technical Specification
 
 **Document ID:** KLESIA-BE-SPEC  
-**Version:** 2.0 (specification of the whole application: demand creation and extraction workflow added, delivery phasing removed; database engine Azure Database for MySQL, DEC-14; hosting Azure Container Apps, DEC-15)  
-**Date:** 2026-11-15  
+**Version:** 2.1 (specification of the whole application: demand creation and extraction workflow, hosting Azure Container Apps DEC-15; database engine Azure SQL Database again, DEC-14 revised)  
+**Date:** 2026-11-18  
 **Status:** Implementation-ready  
+
 **Language:** English  
 **Primary audience:** Backend engineers, database engineers, AI coding agents, QA and infrastructure engineers
 
@@ -16,15 +17,15 @@
 - **MAY**: optional.
 - An explicit **ASSUMPTION** is a proposed implementation choice, not an established client requirement. Agents may use it unless an existing repository convention or signed-off decision contradicts it.
 - **OPEN** items are decisions still to be taken by the client or the DSI. Nothing that depends on them is hard-coded and anything that depends on them is reported as unverified.
-- Changes to endpoint semantics, JSON field names, auth requirements, the database schema, or access rules MUST be deliberate and documented.
+- Changes to endpoint semantics, JSON field names, auth requirements, the SQL schema, or access rules MUST be deliberate and documented.
 
 ### 1.1 Functional scope (IN SCOPE)
 
 | ID | Required outcome |
 |---|---|
-| SC-DB-01 | A buildable database migrator project (DbUp, §3.5) under the `database/` directory with versioned scripts for exactly the six tables of Azure Database for MySQL: `sec_Role`, `sec_User`, `ref_Status`, `Demand`, `DemandInformation`, `DemandFormula`. |
-| SC-DB-02 | A migrator that builds with `dotnet build` (`database/Klesia.Database/Klesia.Database.csproj`) and applies the versioned scripts to an Azure Database for MySQL database with `dotnet run`, recording them in the `SchemaVersions` journal. |
-| SC-DB-03 | Working reference-data and user seed scripts (`Seeds/01_RefData.sql`, `Seeds/02_User.sql`), safe for repeated execution. |
+| SC-DB-01 | A buildable SQL database project under the already initialized `database/` directory with exactly the six business/security tables: `sec.Role`, `sec.User`, `ref.Status`, `dbo.Demand`, `dbo.DemandInformation`, `dbo.DemandFormula`. |
+| SC-DB-02 | Database artifacts that build with `dotnet build` into `database/Klesia.Database/bin/Debug/Klesia.Database.dacpac` and can be published to Azure SQL Database through `SqlPackage`. |
+| SC-DB-03 | Working post-deployment reference-data and user scripts (`Scripts/01_RefData.sql`, `Scripts/02_User.sql`), safe for repeated deployment. |
 | SC-AUTH-01 | Entra ID JWT bearer access-token validation for the backend API. |
 | SC-AUTH-02 | Database allowlist authorization: only existing, active users can access the protected data. |
 | SC-API-01 | `GET /api/v1/demands` (§5.1), returning the signed-in user's identity details and only their demands, without extracted data. |
@@ -35,7 +36,7 @@
 | SC-RT-01 | `POST /api/v1/notifications/negotiate` (§8.1): Entra-protected negotiation of the Azure SignalR connection (Serverless mode, hub `demands`, `userId` = `oid`). |
 | SC-RT-02 | The notification publisher (§8.2): an `INotifier` port in `Application` and its Azure SignalR implementation in `Infrastructure`, sending `demandUpdated` to one user, for N-1 and N-2. |
 | SC-OPS-01 | Configuration, allowed frontend origins, reproducible local run/build instructions and verification tests. |
-| SC-OPS-02 | A production container image definition (`Dockerfile`, `.dockerignore`) for the API and committed deployment instructions and pipeline for Azure Container Apps (DEC-15, §6.3). The migrator is delivered separately (SC-DB-02) and is not part of the image. |
+| SC-OPS-02 | A production container image definition (`Dockerfile`, `.dockerignore`) for the API and committed deployment instructions and pipeline for Azure Container Apps (DEC-15, §6.3). The SQL database project is delivered separately (SC-DB-02) and is not part of the image. |
 
 ### 1.2 Explicitly OUT OF SCOPE
 
@@ -51,37 +52,37 @@
 |---|---|---|
 | OPEN-01 | **Resolved.** The API has **four HTTP routes**: `GET /api/v1/demands` (§5.1), `POST /api/v1/demands` (§7.2), `POST /api/v1/notifications/negotiate` (§8.1) and the anonymous `GET /health` (§5.3). The `demandUpdated` event is **not** HTTP. | Their contract is stated in this document and mirrored in `contracts/openapi.yaml` (DEC-08). Do not add any other route (status mutation, extraction trigger or retry, read of the extracted data). |
 | OPEN-03 | The precise delegated API scope name, Entra tenant ID and API application ID are absent. | Supplied through configuration (§6.1: `AzureAd:*`); never hard-coded. The API refuses to start while they are missing or still placeholders. |
-| OPEN-04 | **Resolved.** The only authorization rule for now is *own data only*: an authenticated, allowlisted, active user receives exclusively the demands whose `Demand.UserId` is their own `sec_User.Id`. | The role codes `admin`, `operational` and `guest` are confirmed as the real codes, but **no role grants or removes any access**. Do not infer cross-user, administrator or role-based behavior. |
+| OPEN-04 | **Resolved.** The only authorization rule for now is *own data only*: an authenticated, allowlisted, active user receives exclusively the demands whose `Demand.UserId` is their own `sec.User.Id`. | The role codes `admin`, `operational` and `guest` are confirmed as the real codes, but **no role grants or removes any access**. Do not infer cross-user, administrator or role-based behavior. |
 | OPEN-05 | **Resolved.** The PDFs are stored in **SharePoint**. `Demand.BaeLink` holds the absolute HTTPS URL of the document in SharePoint. | The API returns that URL after validating that it is an absolute HTTPS URL. SharePoint permissions are the access gate: the browser opens the link with the user's own Entra single sign-on session, so no bearer header, no SAS-style signature and no anonymous link is involved. The links are **permanent** SharePoint URLs: no time-limited, signed or anonymous sharing links are used, and `IBaeLinkResolver` stays a pass-through. Changing this needs a separate decision (tenant sharing policy, Graph permissions). |
 | INT-05 | `maxPdfSizeMb`: 10 MB is illustrative, not confirmed. | The limit is the backend setting `Upload:MaxPdfSizeMb`, provisionally 10 (1 MB = 1,048,576 bytes); it MUST equal the webapp's `public/config/app-config.json` value and be confirmed by the operator before production. |
 | INT-08 | Exact error-body JSON structure. | **Resolved.** Every error response of an application route is RFC 9457 (7807) `application/problem+json` (§5.2). The HTTP status stays the primary signal; the frontend never renders server text. |
 | DEC-01 | Backend target framework. | **.NET 10 (`net10.0`)** from the start (SDK pinned in `global.json`). |
-| DEC-02 | Data access technology. | **Dapper** over **`MySqlConnector`** (DEC-14). **Entity Framework Core, `DbContext` and EF migrations MUST NOT be used.** The SQL scripts of the database migrator (`database/Klesia.Database`) are the single owner of the schema; versioned SQL scripts are not EF migrations. |
-| DEC-03 | Existing repository files take precedence over earlier draft DDL. | Primary keys are named `Id` (DEC-12, DB-03), constraint names follow the single scheme of DB-06, column sizes and defaults follow the original table definitions, and the `ref` grouping is kept as the `ref_` table prefix. The draft DDL in earlier revisions of this document is superseded by §3.4. |
+| DEC-02 | Data access technology. | **Dapper** over `Microsoft.Data.SqlClient`. **Entity Framework Core, `DbContext` and EF migrations MUST NOT be used.** The SQL database project (`database/Klesia.Database`) is the single owner of the schema. |
+| DEC-03 | Existing repository files take precedence over earlier draft DDL. | Primary keys are named `Id` (DEC-12, DB-03), constraint names follow the single scheme of DB-06, column sizes and defaults follow the files already present in `database/`, and the `ref` schema is kept. The draft DDL in earlier revisions of this document is superseded by §3.4. |
 | DEC-04 | Where configuration values live. | Entra, CORS, SQL, SharePoint, Document Intelligence and extraction settings are configuration-file values (§6.1), never code constants. |
 | DEC-05 | Seeded identity. | The seed script creates the project owner's account as an active `admin` user, as explicitly requested. Further identities are added by editing the same script. |
-| DEC-06 | Local development against Azure Database for MySQL. | The connection string (`ConnectionStrings:KlesiaDb`, §6.1) carries **no password**. When the `Password` is absent, `Infrastructure` obtains a Microsoft Entra access token for `https://ossrdbms-aad.database.windows.net/.default` through `DefaultAzureCredential` and supplies it as the MySQL password, refreshed periodically (a token lives 5 to 60 minutes): the developer's `az login` / Visual Studio account on a PC, the **user-assigned** managed identity in Azure (`AZURE_CLIENT_ID`; Flexible Server supports only user-assigned identities). **ASSUMPTION:** "no `Password` means Entra token" is the only switch. No password is ever stored in a tracked file. |
-| DEC-07 | Hosting topology. | **Superseded by DEC-15** for the backend (it was Azure App Service). Unchanged: backend connected to **Azure Database for MySQL – Flexible Server**; frontend on **Azure Static Web Apps**. |
+| DEC-06 | Local development against Azure SQL Database. | One connection string works on a developer PC and in Azure: `Authentication=Active Directory Default` (see §6.1). `DefaultAzureCredential` uses the developer's `az login` / Visual Studio account on a PC and, in Azure, the **user-assigned** managed identity of the container app selected by `AZURE_CLIENT_ID` (DEC-15). No password is ever stored in a tracked file. |
+| DEC-07 | Hosting topology. | **Superseded by DEC-15** for the backend (it was Azure App Service). Unchanged: backend connected to **Azure SQL Database**; frontend on **Azure Static Web Apps**. |
 | DEC-08 | Canonical HTTP contract. | This document is the authoritative description of routes, schemas, status codes, headers and CORS (change contracts here first). `contracts/openapi.yaml`, kept at the workspace root outside this repository, is its machine-readable form and MUST stay identical; any conflict is fixed in both files in the same change, starting here. |
 | DEC-09 | JSON naming convention. | Business payloads (request parts and response bodies) use `snake_case`. The SignalR negotiation response (`url`, `accessToken`) is a protocol payload whose names are fixed by the SignalR client; it is, with `ProblemDetails` (RFC 9457 / ASP.NET Core standard names such as `traceId`), one of the **only two** camelCase exceptions; neither is renamed. |
 | DEC-10 | Success status of `POST /api/v1/demands`. | `201 Created` with the created demand as body (same shape as a `demands[]` item). There is no single-demand route, so no `Location` header is sent. The frontend treats any 2xx as success and ignores the body. |
 | DEC-11 | Delegated scope name. | The delegated scope is named `access_as_user` (fixed in the contract's OAuth2 security scheme and set in `AzureAd:RequiredScope`). The full scope requested by the SPA is `api://<API client id>/access_as_user`. |
-| DEC-12 | Primary-key naming. | Every primary key is named `Id` (`sec_Role.Id`, `sec_User.Id`, `ref_Status.Id`, `Demand.Id`), as in the database project. Foreign keys keep the `{ReferencedTable}Id` form (`RoleId`, `UserId`, `StatusId`). Dapper queries alias keys to the domain names (`d.Id AS DemandId`); the JSON field `demand_id` is `Demand.Id`. This replaces the earlier `{Table}Id` rule. |
+| DEC-12 | Primary-key naming. | Every primary key is named `Id` (`sec.Role.Id`, `sec.User.Id`, `ref.Status.Id`, `Demand.Id`), as in the database project. Foreign keys keep the `{ReferencedTable}Id` form (`RoleId`, `UserId`, `StatusId`). Dapper queries alias keys to the domain names (`d.Id AS DemandId`); the JSON field `demand_id` is `Demand.Id`. This replaces the earlier `{Table}Id` rule. |
 | DEC-13 | Copy of the uploaded PDF into SharePoint. | **Requirement:** the backend MUST copy the PDF received by `POST /api/v1/demands` into the SharePoint document library and MUST store the resulting permanent HTTPS link in `Demand.BaeLink`, so that the user can open the document later from the `bae_link` returned by `GET /api/v1/demands`. The browser never uploads to SharePoint; the database stores the link, never the file; the API server keeps no copy (the extraction reads the document back from SharePoint, EXT-02). All SharePoint access is isolated in `IBaeDocumentStore` (Infrastructure). The stored file name is generated by the backend (for example `{GKNumber}/{unique id}.pdf`) and never taken from the client, so repeated submissions of the same GK number cannot overwrite each other. **ASSUMPTION** (to confirm with the Microsoft 365 administrators OPEN-11): upload through Microsoft Graph as the container app's user-assigned managed identity with the least-privilege `Sites.Selected` permission on the one target site; site, library and base folder come from configuration (`SharePoint:*`, §6.1), never from code or from the client. Who may open a document stays a SharePoint matter (OPEN-05): the library permissions must let the intended users open it; the API does not manage per-document permissions. |
 | OPEN-06 | **Resolved.** How the uploaded BAE PDF reaches SharePoint. | Stated as an explicit requirement in **DEC-13**: copy into SharePoint, store the link in `Demand.BaeLink`. Only deployment settings remain (site, library, folder, permission grant); they are configuration, not an open question about the HTTP contract. |
-| DEC-14 | Database engine: **Azure Database for MySQL** (replaces SQL Server / Azure SQL Database). | The customer's DSI requires **Azure Database for MySQL – Flexible Server, MySQL 8.4** (DB-15). Decided consequences: (1) **one database with prefixed tables** `sec_Role`, `sec_User`, `ref_Status`, `Demand`, because MySQL has no schemas inside a database (DB-02); (2) a **DbUp migrator** (`database/Klesia.Database`) replaces the `.sqlproj` / DACPAC / `SqlPackage` chain (§3.5); (3) **`MySqlConnector` 2.4.0** replaces `Microsoft.Data.SqlClient` (version 3.0.0 appeared on the day of this decision and is not adopted yet); (4) **passwordless access with Microsoft Entra**: the access token is the MySQL password (DEC-06); (5) `UserUniqueId` is `CHAR(36)` and `IsActive`/`IsInternal` are `TINYINT(1)`, each with a `CHECK` that keeps the old type guarantee; (6) collation `utf8mb4_0900_ai_ci` (DB-13); (7) `PK_`/`DF_` names are dropped from DB-06 because MySQL cannot name them. The HTTP contract, JSON, authorization rules and API behavior are **unchanged**; the SQL of the repositories is rewritten in MySQL dialect (backtick quoting, `LIMIT`, `LAST_INSERT_ID()`), an implementation detail of `Infrastructure`. |
-| DEC-15 | Hosting: **Azure Container Apps** (replaces Azure App Service, DEC-07). | The customer's DSI requires that the API be deployed in **Azure Container Apps**. The frontend stays on Azure Static Web Apps and the database on Azure Database for MySQL (DEC-14). Decided consequences: (1) the API is delivered as a **container image** built from a `Dockerfile` at the repository root (§6.3, HOST-01); (2) the container listens on plain **HTTP port 8080** and runs as a non-root user: **TLS ends at the Container Apps ingress**, never in Kestrel (HOST-02, HOST-03); (3) the ingress is the only entry point, so the API reads `X-Forwarded-For` / `X-Forwarded-Proto` (HOST-04); (4) the Container Apps **probes** replace the App Service health check, `GET /health` is unchanged (§5.3, HOST-05); (5) the identity is a **user-assigned managed identity** attached to the container app and selected with the environment variable `AZURE_CLIENT_ID` (DEC-06, HOST-06); (6) configuration comes from **environment variables** (`Section__Key`) and, if ever needed, Container Apps secrets, never from the image (HOST-07); (7) the API is **stateless** and logs to the console only, collected by Log Analytics (HOST-08, HOST-10); (8) the DbUp migrator is **not** part of the API image: the GitHub Actions pipeline runs it as a step before the new revision is deployed (HOST-12). The HTTP contract, JSON, authorization rules, database schema and the Clean Architecture of the code are **unchanged**. |
+| DEC-14 | Database engine: **Azure SQL Database** (SQL Server). | The client's final decision is **Azure SQL Database**. It replaces an intermediate decision to use Azure SQL Database, which is withdrawn. Decided consequences: (1) the three schemas `sec`, `ref` and `dbo` hold the six tables (DB-02); (2) a **SQL database project** (`database/Klesia.Database`, `Microsoft.Build.Sql`) is built into a DACPAC and published with `SqlPackage` (§3.5); (3) **`Microsoft.Data.SqlClient`** is the ADO.NET provider; (4) **passwordless access with Microsoft Entra**: `Authentication=Active Directory Default` (DEC-06); (5) `UserUniqueId` is `UNIQUEIDENTIFIER` and `IsActive`/`IsInternal` are `BIT`; (6) all constraints are named, including primary keys and defaults (`PK_`, `DF_`, `AK_`, `FK_`, `CK_`, `IX_`, DB-06); (7) case-sensitive checks use a binary collation. The HTTP contract, JSON, authorization rules and API behavior are **unchanged**; the SQL of the repositories is T-SQL (`OUTPUT INSERTED.Id`, `UPDATE ... FROM`), an implementation detail of `Infrastructure`. |
+| DEC-15 | Hosting: **Azure Container Apps** (replaces Azure App Service, DEC-07). | The customer's DSI requires that the API be deployed in **Azure Container Apps**. The frontend stays on Azure Static Web Apps and the database on Azure SQL Database (DEC-14). Decided consequences: (1) the API is delivered as a **container image** built from a `Dockerfile` at the repository root (§6.3, HOST-01); (2) the container listens on plain **HTTP port 8080** and runs as a non-root user: **TLS ends at the Container Apps ingress**, never in Kestrel (HOST-02, HOST-03); (3) the ingress is the only entry point, so the API reads `X-Forwarded-For` / `X-Forwarded-Proto` (HOST-04); (4) the Container Apps **probes** replace the App Service health check, `GET /health` is unchanged (§5.3, HOST-05); (5) the identity is a **user-assigned managed identity** attached to the container app and selected with the environment variable `AZURE_CLIENT_ID` (DEC-06, HOST-06); (6) configuration comes from **environment variables** (`Section__Key`) and, if ever needed, Container Apps secrets, never from the image (HOST-07); (7) the API is **stateless** and logs to the console only, collected by Log Analytics (HOST-08, HOST-10); (8) the SQL database project is **not** part of the API image: the GitHub Actions pipeline publishes the DACPAC with `SqlPackage` as a step before the new revision is deployed (HOST-12). The HTTP contract, JSON, authorization rules, database schema and the Clean Architecture of the code are **unchanged**. |
 | DEC-16 | Real-time notifications. | The client decided (2026-11-12) that the backend notifies the owner through Azure SignalR **at two moments**: **N-1** when a new demand has been stored in the database and **N-2** when the extraction of the PDF is finished and the demand status has changed. Both use the same event `demandUpdated` with no payload and go to the owner only (§8.2); the frontend reloads its list with `GET /api/v1/demands` on each. N-2 is sent whether the extraction succeeded or failed (DEC-17, DEC-19). Azure SignalR Service is used in Serverless mode. |
-| OPEN-07 | **Open: to confirm with the customer's DSI.** Azure Database for MySQL deployment settings. | (a) MySQL version: 8.4 is the target (DB-15). (b) Server name, database `klesia`, region and network access (public access with firewall rules, or private access: the Container Apps environment must reach the server, see OPEN-08). (c) Entra authentication: an Entra administrator on the server, a **user-assigned** managed identity as server identity with the Microsoft Graph permissions (or *Directory Readers* role) granted by a Privileged Role Administrator, and the database users for the runtime and deployment principals. (d) The `lower_case_table_names` setting (DB-04). (e) TLS is mandatory: confirm the CA chain so `SslMode=VerifyFull` can be used. (f) Whether `aad_auth_only` is `ON`. Until confirmed none of this is hard-coded: it is configuration (§6.1). |
-| OPEN-08 | **Open: to confirm with the customer's DSI.** Azure Container Apps deployment settings. | (a) The Container Apps environment (type, region) and whether it is integrated in a virtual network. (b) The network path to MySQL (OPEN-07b): the outbound addresses of a Container Apps environment are not a stable firewall allowlist unless the environment sits in a virtual network with fixed egress, so private access is the preferred target. (c) Ingress exposure: external (the browser of the Static Web App calls the API) or behind another entry point, IP restrictions, custom domain and certificate. (d) The container registry (Azure Container Registry name; the managed identity pulls with `AcrPull`), image retention and tag policy. (e) Minimum and maximum replicas (a minimum of 0 means a cold start, whose first request also acquires the Entra token and opens the TLS connection to MySQL; the background extraction, EXT-01, also argues for a minimum of at least 1 so that a replica is not scaled in while a job runs, OPEN-10), CPU/memory size, the scaling rule and the probe thresholds. (f) The maximum request body size and the request timeout of the ingress (240 s documented) against `Upload:MaxPdfSizeMb`, before production. (g) Who owns the infrastructure code (Bicep): the DSI's infrastructure contract or this repository, and the role assignments (`AcrPull`, `Sites.Selected`, SignalR, Document Intelligence). (h) The Log Analytics workspace and the telemetry backend (§6.2). (i) GitHub Actions to Azure authentication: an OpenID Connect federated credential on a deployment principal (no stored secret), environments and approvals. Until confirmed none of this is hard-coded: it is configuration or infrastructure code. |
+| OPEN-07 | **Open: to confirm with the customer's DSI.** Azure SQL Database deployment settings. | (b) Server name, database name, service tier, region and network access (public access with firewall rules, or a private endpoint: the Container Apps environment must reach the server, see OPEN-08). (c) Entra authentication: an Entra administrator on the logical server, and the database users of the runtime and deployment principals (`CREATE USER [name] FROM EXTERNAL PROVIDER`). (d) Whether Microsoft Entra-only authentication is enabled. (e) TLS: `Encrypt=True` and `TrustServerCertificate=False` (the defaults used in §6.1). Until confirmed none of this is hard-coded: it is configuration (§6.1). |
+| OPEN-08 | **Open: to confirm with the customer's DSI.** Azure Container Apps deployment settings. | (a) The Container Apps environment (type, region) and whether it is integrated in a virtual network. (b) The network path to Azure SQL Database (OPEN-07a): the outbound addresses of a Container Apps environment are not a stable firewall allowlist unless the environment sits in a virtual network with fixed egress, so private access is the preferred target. (c) Ingress exposure: external (the browser of the Static Web App calls the API) or behind another entry point, IP restrictions, custom domain and certificate. (d) The container registry (Azure Container Registry name; the managed identity pulls with `AcrPull`), image retention and tag policy. (e) Minimum and maximum replicas (a minimum of 0 means a cold start, whose first request also acquires the Entra token and opens the TLS connection to Azure SQL Database; the background extraction, EXT-01, also argues for a minimum of at least 1 so that a replica is not scaled in while a job runs, OPEN-10), CPU/memory size, the scaling rule and the probe thresholds. (f) The maximum request body size and the request timeout of the ingress (240 s documented) against `Upload:MaxPdfSizeMb`, before production. (g) Who owns the infrastructure code (Bicep): the DSI's infrastructure contract or this repository, and the role assignments (`AcrPull`, `Sites.Selected`, SignalR, Document Intelligence). (h) The Log Analytics workspace and the telemetry backend (§6.2). (i) GitHub Actions to Azure authentication: an OpenID Connect federated credential on a deployment principal (no stored secret), environments and approvals. Until confirmed none of this is hard-coded: it is configuration or infrastructure code. |
 | INT-09 | Duplicate submissions. | Allowed: each `POST /api/v1/demands` creates a new demand and a new extraction. `Demand.GKNumber` is not unique (AT-16, AT-30) and the frontend never retries a submission automatically. |
 | DEC-17 | Demand creation workflow. | Creating a demand is a three-step workflow `[1. Demand creation] → [2. Extraction] → [3. DONE]` (§7). Step 1 is the HTTP request: it answers `201` with the demand in status `pending`. Steps 2 and 3 run in the background, in the API process, after the response (EXT-01). The owner is told through SignalR at the end of step 1 (N-1) and at the end of step 3, whether it ended well or not (N-2). |
 | DEC-18 | Document extraction engine. | **Azure AI Document Intelligence** with a custom model trained for the BAE form. Its endpoint and model id are configuration (`DocumentIntelligence:Endpoint`, `DocumentIntelligence:ModelId`, §6.1), never code. The service answers with the JSON of EXT-04, which the API validates and stores in `DemandInformation` and `DemandFormula`. **ASSUMPTION:** the API calls the service with the container app's user-assigned managed identity (role *Cognitive Services User*), no key. |
-| DEC-19 | Status vocabulary. | Exactly three codes: `pending` (stored, extraction not finished), `ok` (the **DONE** status of the workflow: extraction stored; its `Name` is "Done"), `fail` (extraction failed). `ok` stays the code of the done status because it is the code already seeded in `ref_Status` and the one the frontend reads (§3.3, §5.1): renaming it to `done` would change the HTTP contract and the seeds for no benefit. A demand leaves `pending` exactly once; `ok` and `fail` are final. |
-| DEC-20 | Owner of a new demand. | The owner is the user of the validated token. `POST /api/v1/demands` receives the GK number and the PDF only: **no user id is sent or read**, because an id supplied by the client would let a user create demands in someone else's name (AUTH-01 point 6). The "user ID" of the workflow description is the `oid` of the token, resolved to `sec_User.Id` by the allowlist check. |
+| DEC-19 | Status vocabulary. | Exactly three codes: `pending` (stored, extraction not finished), `ok` (the **DONE** status of the workflow: extraction stored; its `Name` is "Done"), `fail` (extraction failed). `ok` stays the code of the done status because it is the code already seeded in `ref.Status` and the one the frontend reads (§3.3, §5.1): renaming it to `done` would change the HTTP contract and the seeds for no benefit. A demand leaves `pending` exactly once; `ok` and `fail` are final. |
+| DEC-20 | Owner of a new demand. | The owner is the user of the validated token. `POST /api/v1/demands` receives the GK number and the PDF only: **no user id is sent or read**, because an id supplied by the client would let a user create demands in someone else's name (AUTH-01 point 6). The "user ID" of the workflow description is the `oid` of the token, resolved to `sec.User.Id` by the allowlist check. |
 | DEC-21 | Naming in the extraction tables. | One uniform naming in the database: `DemandInformation` and `DemandFormula` follow DB-03 and DB-04 like every other table, so their columns are PascalCase (`RiskType`, `EstablishmentSiret`, `Name`). The JSON of EXT-04 keeps its snake_case names (DEC-09). The mapping of each JSON field to its column (`risk_type` → `RiskType`) is written explicitly once, in the `Infrastructure` repository (Dapper parameters), never by a naming convention or a global Dapper setting. |
 | DEC-22 | Extracted data stays internal. | `GET /api/v1/demands` does not expose it (§5.1) and no other route reads it. Exposing it later is a contract change made here first. |
-| DEC-23 | Creation time of a demand. | `Demand.CreatedAt` (UTC, set by the database) is added by migration `0005` so that the recovery sweep (EXT-09) can tell a stale `pending` demand from one being processed. It is not returned by the API. **ASSUMPTION** tied to OPEN-10: it is harmless and reusable if a message queue replaces the sweep. |
+| DEC-23 | Creation time of a demand. | `Demand.CreatedAt` (UTC, set by the database) is added to `dbo.Demand` by the SQL project so that the recovery sweep (EXT-09) can tell a stale `pending` demand from one being processed. It is not returned by the API. **ASSUMPTION** tied to OPEN-10: it is harmless and reusable if a message queue replaces the sweep. |
 | OPEN-09 | **Open: to confirm with the Document Intelligence owners.** | (a) Model id, endpoint, region and API version (configuration, §6.1). (b) The exact response envelope: this document assumes the service hands the API the JSON of EXT-04 as is. If the real answer is the standard Document Intelligence `AnalyzeResult` (typed fields with confidences), the mapping to EXT-04 lives in the Infrastructure adapter only; EXT-04 stays the contract of `IDocumentExtractor`. (c) Which fields the model may leave empty: the *Required* column of EXT-04 is an ASSUMPTION. (d) The PDF limits of the model (size, pages) against `Upload:MaxPdfSizeMb`. (e) Throttling quota and call timeout. |
 | OPEN-10 | **Open: durability of the background work.** | EXT-01 runs the extraction in the API process with an in-memory queue and a recovery sweep (EXT-09): a replica that stops mid-extraction leaves the demand `pending` until the sweep resubmits it after `Extraction:StaleAfterMinutes`. If the DSI needs a guaranteed hand-over, replace the in-memory queue with a message queue (Azure Service Bus) behind the same `IExtractionQueue` port; nothing else in this document changes. Not decided. |
 | OPEN-11 | **Open: SharePoint identity.** | DEC-13 assumes the container app's managed identity with `Sites.Selected`. The client requires that the account, the site, the library and the folder be configuration (`SharePoint:*`, §6.1). If a dedicated account or app registration is imposed instead, only `SharePoint:ClientId` and the way the Graph token is obtained change, and no secret may be stored in configuration (Key Vault, HOST-07). |
@@ -94,7 +95,7 @@ flowchart LR
     FE -->|Microsoft Entra sign-in| ENTRA[Microsoft Entra ID]
     FE -->|GET and POST /api/v1/demands\nBearer access token| API[Backend API / ASP.NET Core .NET 10 / Azure Container Apps]
     API -->|Validate JWT issuer, audience,\nsignature, lifetime, delegated scope| ENTRA
-    API -->|Dapper: allowlist lookup by Entra oid,\ndemands, extracted data| DB[(Azure Database for MySQL)]
+    API -->|Dapper: allowlist lookup by Entra oid,\ndemands, extracted data| DB[(Azure SQL Database)]
     FE -->|Opens bae_link with the user's SSO session| SP[SharePoint documents]
     API -->|Microsoft Graph: copy and read back the PDF| SP
     API -->|Background: analyze the PDF with the custom model| DI[Azure Document Intelligence]
@@ -104,52 +105,47 @@ flowchart LR
 
 **Technology baseline:**
 
-- Database (**DEC-14**): **Azure Database for MySQL – Flexible Server, MySQL 8.4**, one database (`klesia`) whose schema is created by the DbUp migrator project in `database/Klesia.Database`. **The migrator's SQL scripts are the only owner of the schema.**
+- Database: Microsoft SQL Server / Azure SQL Database, modeled through a `.sqlproj` SQL database project (`Microsoft.Build.Sql`). **The SQL project is the only owner of the schema.**
 - Backend (**DEC-01**): ASP.NET Core Web API in C# on **.NET 10 (`net10.0`)**, following the existing Clean Architecture solution (`Domain`, `Application`, `Infrastructure`, `WebApi`; dependencies point inward only).
-- Data access (**DEC-02**): **Dapper** with `MySqlConnector`, implemented in `Infrastructure` behind repository interfaces declared in `Application`. **Entity Framework Core, `DbContext`, EF migrations and EF design-time tooling MUST NOT be used.** Every SQL statement is a parameterized, hand-written query.
+- Data access (**DEC-02**): **Dapper** with `Microsoft.Data.SqlClient`, implemented in `Infrastructure` behind repository interfaces declared in `Application`. **Entity Framework Core, `DbContext`, EF migrations and EF design-time tooling MUST NOT be used.** Every SQL statement is a parameterized, hand-written query.
 - Authentication: Microsoft Entra ID, JWT bearer **access tokens intended for this API**, validated with the ASP.NET Core JWT bearer middleware.
-- Authorization: explicit server-side SQL allowlist (`sec_User`) after JWT validation; the only access rule is *own demands only* (OPEN-04).
+- Authorization: explicit server-side SQL allowlist (`sec.User`) after JWT validation; the only access rule is *own demands only* (OPEN-04).
 - Documents: PDFs live in SharePoint; `Demand.BaeLink` stores the document URL (OPEN-05). The API copies the PDF there (DEC-13) and reads it back for the extraction.
 - Extraction (**DEC-18**): Azure AI Document Intelligence with a custom model, called from a background worker of the API (§7.3); its results are stored in `DemandInformation` and `DemandFormula`.
 - Real time: Azure SignalR Service in Serverless mode, one event `demandUpdated` sent to the owner only (§8).
 - Frontend: existing Vue application hosted in Azure Static Web Apps, with Vite local development at `http://localhost:5173`.
-- Hosting (**DEC-15**, which supersedes DEC-07): this API runs as a container in **Azure Container Apps** (connected to Azure Database for MySQL), see §6.3; the frontend runs on **Azure Static Web Apps**.
+- Hosting (**DEC-15**, which supersedes DEC-07): this API runs as a container in **Azure Container Apps** (connected to Azure SQL Database), see §6.3; the frontend runs on **Azure Static Web Apps**.
 - Configuration (**DEC-04**): environment-specific; tenant ID, API client ID, delegated scope, allowed origins, the SQL connection string, the SharePoint location and the Document Intelligence endpoint and model are configuration values, not source code (§6.1).
-- Database connection: least-privilege runtime identity; the **user-assigned** managed identity in Azure and the developer's own Entra account on a PC, both through a Microsoft Entra access token used as the password (DEC-06). The credential used by the migrator is a **deployment** concern and must not be copied into frontend settings or application settings.
+- Database connection: least-privilege runtime identity; the **user-assigned** managed identity in Azure and the developer's own Entra account on a PC, both through `Authentication=Active Directory Default` (DEC-06). The SQL credential used by `SqlPackage` is a **deployment** concern and must not be copied into frontend settings or application settings.
 
 ## 3. Database specification
-
-> **Engine change (DEC-14).** The customer's DSI requires **Azure Database for MySQL (Flexible Server)**. Version 1.3 of this document targeted Azure SQL Database; every database requirement below replaces it. Business behavior, table and column names, the API contract and the authorization rules are unchanged.
 
 ### 3.1 Design requirements
 
 | ID | Requirement |
 |---|---|
-| DB-01 | Use a separate script file for every table (and, by DB-14, one DDL object per migration script). |
-| DB-02 | Exactly six domain tables, all in one database (`klesia`): `sec_Role`, `sec_User`, `ref_Status`, `Demand`, `DemandInformation`, `DemandFormula`. MySQL has no schemas inside a database (a schema *is* a database), so the former `sec`, `ref` and `dbo` schemas are expressed as a **table-name prefix**: `sec_` for security tables, `ref_` for reference/lookup tables (the status lookup), no prefix for business data, extraction tables included (DEC-14). |
-| DB-03 | Every table has a primary key named `Id`: `Id INT NOT NULL AUTO_INCREMENT` (`sec_Role.Id`, `sec_User.Id`, `ref_Status.Id`, `Demand.Id`). Foreign-key columns are named `{ReferencedTable}Id` with the unprefixed table name (`RoleId`, `UserId`, `StatusId`), see DEC-12. |
-| DB-04 | All table (after its prefix) and column identifiers use PascalCase; the prefixes `sec_` and `ref_` are lower case. Every identifier is spelled identically in every statement and quoted with backticks in scripts. The server may store table names in lower case (`lower_case_table_names`, Azure's default; confirm in OPEN-07), so two tables must never differ only by case and no code may rely on case to tell tables apart. |
-| DB-05 | Declare every foreign key explicitly and create an index with the foreign-key column as leading key (declared in the same `CREATE TABLE`, so MySQL reuses it instead of generating one). Do not create an index that duplicates the primary key or a unique constraint. |
-| DB-06 | Name every foreign key, unique key, check and index with the **single scheme** below. Primary keys and defaults cannot be named in MySQL. |
+| DB-01 | Use separate files for SQL schemas and every table definition. |
+| DB-02 | Exactly six domain tables: `sec.Role`, `sec.User`, `ref.Status`, `dbo.Demand`, `dbo.DemandInformation`, `dbo.DemandFormula`. Schema usage: `sec` for security tables, `ref` for reference/lookup tables (the status lookup), `dbo` for business data, extraction tables included. |
+| DB-03 | Every table has a primary key named `Id`: `Id INT IDENTITY(1,1)` (`sec.Role.Id`, `sec.User.Id`, `ref.Status.Id`, `dbo.Demand.Id`, `dbo.DemandInformation.Id`, `dbo.DemandFormula.Id`). Foreign-key columns are named `{ReferencedTable}Id` (`RoleId`, `UserId`, `StatusId`, `DemandId`, `DemandInformationId`), see DEC-12. |
+| DB-04 | All schema, table and column identifiers use PascalCase, except the schema identifiers `sec`, `dbo` and `ref`. |
+| DB-05 | Declare every foreign key explicitly and create an index with the foreign-key column as leading key. Do not create an index that duplicates the primary key or a unique constraint. |
+| DB-06 | Name every constraint and index with the **single scheme** below. |
 | DB-07 | Enforce all described mandatory fields through `NOT NULL`; apply only justified checks/uniqueness. |
-| DB-08 | Use MySQL-native types (DEC-14 maps each). Do not introduce `FLOAT`/`DOUBLE` for future monetary or percentage data (use `DECIMAL`). No such field exists today. |
-| DB-09 | Do not declare `ON DELETE` / `ON UPDATE` actions and do not add cascade deletes: InnoDB's default (`RESTRICT`) is the equivalent of the former `NO ACTION`. |
+| DB-08 | Use SQL Server-native types. Do not introduce `FLOAT` for future monetary or percentage data (use `DECIMAL`). No such field exists today. |
+| DB-09 | Use `NO ACTION` behavior for deletes; do not add cascade deletes. |
 | DB-10 | Maintain third-normal-form style associations; do not copy role, status or user names onto `Demand`. |
-| DB-11 | Re-running the deployment MUST preserve user-generated and existing business data: migrations are applied once and recorded, seeds are idempotent. Destructive schema changes (drop, narrowing, rename) require explicit review: the migrator has no automatic data-loss blocking. |
+| DB-11 | A re-publish MUST preserve user-generated and existing business data; destructive schema changes require explicit review. |
 | DB-12 | The runtime reads the database exclusively through Dapper with parameterized SQL (see §2). No ORM mapping drives the schema. |
-| DB-13 | Engine **InnoDB** (foreign keys, `CHECK`), character set **`utf8mb4`**, collation **`utf8mb4_0900_ai_ci`**, declared explicitly on every table. Comparisons are case- and accent-insensitive (the former model collation was `1033, CI`); no key relies on case or accents, and where case matters (`ref_Status.Code`, `Demand.GKNumber`) the constraint states a case-sensitive match explicitly. |
-| DB-14 | MySQL DDL is **not transactional** (each statement commits implicitly). Every migration script holds **one** DDL object, so a failure never leaves a half-applied script. A script applied in any shared environment is **immutable**: corrections are new, higher-numbered scripts. A script must not contain a semicolon inside a comment or string literal (the DbUp splitter cuts on it). |
-| DB-15 | The database is **Azure Database for MySQL – Flexible Server running MySQL 8.4**. `CHECK` constraints are only enforced from MySQL 8.0.16, so a server older than that is unsupported. MySQL 8.0 is not targeted (its standard support on Azure ends on 2027-01-31) and 5.7 is out of standard support. |
 
-**Naming scheme (DB-06)** — `{Table}` is the **logical** table name without its prefix (`Role`, `User`, `Status`, `Demand`); the pattern is the same for every table. Foreign-key and check names are unique per database in MySQL, so no two objects may share a name.
+**Naming scheme (DB-06)** — `{Table}` is the unqualified table name; the pattern is the same for every table:
 
 | Object | Pattern | Examples |
 |---|---|---|
-| Primary key | not nameable (MySQL always calls it `PRIMARY`) | — |
+| Primary key | `PK_{Table}` | `PK_Role`, `PK_Demand` |
 | Foreign key | `FK_{Table}_{ReferencedTable}` (the table that holds the column first) | `FK_User_Role`, `FK_Demand_User`, `FK_Demand_Status` |
-| Unique (alternate) key | `AK_{Table}_{Column}` (the unique index carries the same name) | `AK_Role_Code`, `AK_User_UserUniqueId`, `AK_Status_Code` |
-| Check | `CK_{Table}_{Column}` (or `CK_{Table}_{Rule}` when it spans columns) | `CK_Status_Code`, `CK_User_UserUniqueId`, `CK_User_Flags`, `CK_Demand_GKNumber`, `CK_Demand_BaeLink` |
-| Default | not nameable: declared inline with the column | — |
+| Unique (alternate) key | `AK_{Table}_{Column}` | `AK_Role_Code`, `AK_User_UserUniqueId`, `AK_Status_Code` |
+| Check | `CK_{Table}_{Column}` (or `{Rule}` when it spans columns) | `CK_Status_Code`, `CK_Demand_GKNumber`, `CK_Demand_BaeLink` |
+| Default | `DF_{Table}_{Column}` | `DF_User_RoleId`, `DF_User_IsActive` |
 | Non-unique index | `IX_{Table}_{Column}[_{Column}]` | `IX_User_RoleId`, `IX_Demand_UserId`, `IX_Demand_StatusId` |
 
 #### 3.2 Schema and cardinality
@@ -163,30 +159,30 @@ erDiagram
     DemandInformation ||--|{ DemandFormula : "DemandInformationId"
     Role {
       int Id PK
-      varchar Name
-      varchar Code UK
+      nvarchar Name
+      nvarchar Code UK
     }
     User {
       int Id PK
-      char36 UserUniqueId UK
+      uniqueidentifier UserUniqueId UK
       int RoleId FK
-      varchar Name
-      varchar Email
-      tinyint IsInternal
-      tinyint IsActive
+      nvarchar Name
+      nvarchar Email
+      bit IsInternal
+      bit IsActive
     }
     Status {
       int Id PK
-      varchar Name
-      varchar DisplayName
-      varchar Code UK
-      varchar Description
+      nvarchar Name
+      nvarchar DisplayName
+      nvarchar Code UK
+      nvarchar Description
     }
     Demand {
       int Id PK
       int UserId FK
       char GKNumber
-      varchar BaeLink
+      nvarchar BaeLink
       int StatusId FK
       datetime CreatedAt
     }
@@ -207,66 +203,65 @@ erDiagram
     }
 ```
 
-The entity names above are the logical names. The physical tables are `sec_Role`, `sec_User`, `ref_Status`, `Demand`, `DemandInformation` and `DemandFormula`.
+The entity names above are the logical names. The physical tables are `sec.Role`, `sec.User`, `ref.Status`, `dbo.Demand`, `dbo.DemandInformation` and `dbo.DemandFormula`.
 
-**Critical identity distinction:** `sec_User.Id` is the internal database identity (`INT`). `sec_User.UserUniqueId` is the Microsoft Entra user's `oid` (a GUID stored as `CHAR(36)`). The API's `user_id` response field refers to **`UserUniqueId`**, never the internal `Id`.
+**Critical identity distinction:** `sec.User.Id` is the internal SQL identity (`INT`). `sec.User.UserUniqueId` is the Microsoft Entra user's `oid` (`UNIQUEIDENTIFIER`). The API's `user_id` response field refers to **`UserUniqueId`**, never the internal `Id`.
+
 
 ### 3.3 Canonical table contracts
 
-Type mapping from the SQL Server baseline (DEC-14): `INT IDENTITY(1,1)` → `INT NOT NULL AUTO_INCREMENT`; `NVARCHAR(n)` → `VARCHAR(n)` (`utf8mb4`); `UNIQUEIDENTIFIER` → `CHAR(36)`; `BIT` → `TINYINT(1)`; `CHAR(18)` is unchanged.
+#### `sec.Role`
 
-#### `sec_Role`
-
-| Column | MySQL type | Null | Rules |
+| Column | SQL type | Null | Rules |
 |---|---|---|---|
-| `Id` | `INT AUTO_INCREMENT` | No | Primary key |
-| `Name` | `VARCHAR(300)` | No | Display/human-readable role name |
-| `Code` | `VARCHAR(50)` | No | Unique stable role identifier: `AK_Role_Code`. Confirmed codes: `admin`, `operational`, `guest` |
+| `Id` | `INT IDENTITY(1,1)` | No | `PK_Role` |
+| `Name` | `NVARCHAR(300)` | No | Display/human-readable role name |
+| `Code` | `NVARCHAR(50)` | No | Unique stable role identifier: `AK_Role_Code`. Confirmed codes: `admin`, `operational`, `guest` |
 
 A role can be associated with multiple users; each user has exactly one role. **No role grants any permission** (OPEN-04).
 
-#### `sec_User`
+#### `sec.User`
 
-| Column | MySQL type | Null | Rules |
+| Column | SQL type | Null | Rules |
 |---|---|---|---|
-| `Id` | `INT AUTO_INCREMENT` | No | Primary key |
-| `UserUniqueId` | `CHAR(36)` | No | Entra `oid` in canonical lower-case `8-4-4-4-12` form; `AK_User_UserUniqueId`; `CK_User_UserUniqueId` rejects any other format (it replaces the guarantee `UNIQUEIDENTIFIER` gave) |
-| `RoleId` | `INT` | No | `FK_User_Role` → `sec_Role(Id)`; indexed by `IX_User_RoleId`; default `1` |
-| `Name` | `VARCHAR(300)` | No | Entire name, returned in API as `user_name` |
-| `Email` | `VARCHAR(300)` | No | Informational only; **never** use to identify/authorize users |
-| `IsInternal` | `TINYINT(1)` | No | Internal-company flag; default `1`; `CK_User_Flags` restricts it to `0`/`1` |
-| `IsActive` | `TINYINT(1)` | No | Required for access; default `1`; `CK_User_Flags` restricts it to `0`/`1` |
+| `Id` | `INT IDENTITY(1,1)` | No | `PK_User` |
+| `UserUniqueId` | `UNIQUEIDENTIFIER` | No | Entra `oid`; `AK_User_UserUniqueId` |
+| `RoleId` | `INT` | No | `FK_User_Role` → `sec.Role(Id)`; indexed by `IX_User_RoleId`; default `1` (`DF_User_RoleId`) |
+| `Name` | `NVARCHAR(300)` | No | Entire name, returned in API as `user_name` |
+| `Email` | `NVARCHAR(300)` | No | Informational only; **never** use to identify/authorize users |
+| `IsInternal` | `BIT` | No | Internal-company flag; default `1` (`DF_User_IsInternal`) |
+| `IsActive` | `BIT` | No | Required for access; default `1` (`DF_User_IsActive`) |
 
-> **Defaults note (DEC-03).** The three defaults above come from the original table definitions and are kept on purpose (MySQL cannot name them). They are harmless because the API never inserts users and every seeded row states its values explicitly. They are **not** fail-closed (`IsActive` defaults to `1`, `RoleId` defaults to the first role): re-examine them before any user-provisioning feature exists.
+> **Defaults note (DEC-03).** The three defaults above come from the table definitions already present in the repository and are kept on purpose. They are harmless because the API never inserts users and every seeded row states its values explicitly. They are **not** fail-closed (`IsActive` defaults to `1`, `RoleId` defaults to the first role): re-examine them before any user-provisioning feature exists.
 
 The `UserUniqueId` uniqueness is based on the **ASSUMPTION** of a single configured Entra tenant. If multiple tenants are authorized later, the identity model must include a tenant identifier and use a tenant/oid composite authorization key (requires a reviewed schema change). Do not allow arbitrary tenants while keeping an `oid`-only lookup.
 
 `Email` is **not** unique by default: email can change and is not the authoritative identity key.
 
-#### `ref_Status`
+#### `ref.Status`
 
-| Column | MySQL type | Null | Rules |
+| Column | SQL type | Null | Rules |
 |---|---|---|---|
-| `Id` | `INT AUTO_INCREMENT` | No | Primary key |
-| `Name` | `VARCHAR(100)` | No | Internal name |
-| `DisplayName` | `VARCHAR(100)` | No | Human-readable label |
-| `Code` | `VARCHAR(20)` | No | Unique: `AK_Status_Code`; allowed `pending`, `ok`, `fail`, matched case-sensitively (`CK_Status_Code`) |
-| `Description` | `VARCHAR(500)` | Yes | Explanatory text, optional |
+| `Id` | `INT IDENTITY(1,1)` | No | `PK_Status` |
+| `Name` | `NVARCHAR(100)` | No | Internal name |
+| `DisplayName` | `NVARCHAR(100)` | No | Human-readable label |
+| `Code` | `NVARCHAR(20)` | No | Unique: `AK_Status_Code`; allowed `pending`, `ok`, `fail` (`CK_Status_Code`) |
+| `Description` | `NVARCHAR(500)` | Yes | Explanatory text, optional |
 
 Status `Code` is the source of the API `status` property; do not return the `Name` or `DisplayName` instead. `pending`: the demand is stored and its extraction is not finished. `ok`: the **done** status, the extraction is stored in `DemandInformation` and `DemandFormula` (DEC-19). `fail`: the extraction failed and nothing was stored. Adding more status values is an explicit API/schema evolution.
 
-#### `Demand`
+#### `dbo.Demand`
 
-| Column | MySQL type | Null | Rules |
+| Column | SQL type | Null | Rules |
 |---|---|---|---|
-| `Id` | `INT AUTO_INCREMENT` | No | Primary key |
-| `UserId` | `INT` | No | `FK_Demand_User` → `sec_User(Id)`; indexed by `IX_Demand_UserId` |
+| `Id` | `INT IDENTITY(1,1)` | No | `PK_Demand` |
+| `UserId` | `INT` | No | `FK_Demand_User` → `sec.User(Id)`; indexed by `IX_Demand_UserId` |
 | `GKNumber` | `CHAR(18)` | No | GK (Geode Klesia) number: `GK` + six digits (a `YYMMDD` date) + hyphen + nine digits, e.g. `GK260902-144743112` (`CK_Demand_GKNumber`) |
-| `BaeLink` | `VARCHAR(2048)` | No | Absolute HTTPS URL of the PDF in SharePoint; checked at least for the HTTPS prefix (`CK_Demand_BaeLink`) |
-| `StatusId` | `INT` | No | `FK_Demand_Status` → `ref_Status(Id)`; indexed by `IX_Demand_StatusId` |
-| `CreatedAt` | `DATETIME(6)` | No | UTC creation time, set by the database (`DEFAULT (UTC_TIMESTAMP(6))`), never sent by the API and never returned by it. Added by migration `0005` (DEC-23). Used by the recovery sweep (EXT-09) |
+| `BaeLink` | `NVARCHAR(2048)` | No | Absolute HTTPS URL of the PDF in SharePoint; checked at least for the HTTPS prefix (`CK_Demand_BaeLink`) |
+| `StatusId` | `INT` | No | `FK_Demand_Status` → `ref.Status(Id)`; indexed by `IX_Demand_StatusId` |
+| `CreatedAt` | `DATETIME2(6)` | No | UTC creation time, set by the database (`DF_Demand_CreatedAt`, `DEFAULT SYSUTCDATETIME()`), never sent by the API and never returned by it (DEC-23). Used by the recovery sweep (EXT-09) |
 
-**The GK number is a string.** It is stored as text (`CHAR(18)`), carried as a string in the domain (`GKNumber`), in the DTOs and in JSON, exactly as stored (no reformatting). Its format is `GK` + six digits (a date, `YYMMDD`) + a hyphen (`-`) + a number of nine digits, e.g. `GK260902-144743112` (regex `^GK[0-9]{6}-[0-9]{9}$`). The database check enforces this format with `REGEXP_LIKE(GKNumber, '^GK[0-9]{6}-[0-9]{9}$', 'c')` (the `c` match type makes the prefix case-sensitive) and `CHAR_LENGTH(GKNumber) = 18`. MySQL pads `CHAR` values and strips trailing spaces when reading them, so a shorter value padded with spaces can never satisfy the pattern. Validating that the six digits form a real calendar date, or any checksum, is **not** required.
+**The GK number is a string.** It is stored as text (`CHAR(18)`), carried as a string in the domain (`GKNumber`), in the DTOs and in JSON, exactly as stored (no reformatting). Its format is `GK` + six digits (a date, `YYMMDD`) + a hyphen (`-`) + a number of nine digits, e.g. `GK260902-144743112` (regex `^GK[0-9]{6}-[0-9]{9}$`). The database check enforces this format with a literal pattern and a binary collation (so that the prefix is case-sensitive and a shorter value padded with spaces is rejected). Validating that the six digits form a real calendar date, or any checksum, is **not** required.
 
 `Demand.GKNumber` MUST **NOT** be unique: several demands with the same GK number must remain possible.
 
@@ -276,35 +271,35 @@ Status `Code` is the source of the API `status` property; do not return the `Nam
 
 One row per demand whose extraction succeeded: the information read from the PDF by Document Intelligence (§7.3). Each extracted-data column is the PascalCase form of the JSON field of EXT-04 (`risk_type` becomes `RiskType`, DEC-21). The *Required* column is an ASSUMPTION (OPEN-09c): the columns the model must always find are `NOT NULL`, the others accept `NULL`, and an extraction that lacks a required value fails (EXT-05).
 
-| Column | MySQL type | Null | Rules |
+| Column | SQL Server type | Null | Rules |
 |---|---|---|---|
-| `Id` | `INT AUTO_INCREMENT` | No | Primary key |
-| `DemandId` | `INT` | No | `FK_DemandInformation_Demand` → `Demand(Id)`; unique: `AK_DemandInformation_DemandId` (at most one information record per demand; its unique index also serves the foreign key, DB-05) |
-| `Brand` | `VARCHAR(100)` | No | Type of form, e.g. `HCR Santé` |
-| `Branch` | `VARCHAR(200)` | No | Professional branch, e.g. `CCN de l'immobilier` |
-| `RiskType` | `VARCHAR(100)` | No | Risk type, e.g. `PRÉVOYANCE` |
+| `Id` | `INT IDENTITY(1,1)` | No | Primary key (`PK_DemandInformation`) |
+| `DemandId` | `INT` | No | `FK_DemandInformation_Demand` → `dbo.Demand(Id)`; unique: `AK_DemandInformation_DemandId` (at most one information record per demand; its unique index also serves the foreign key, DB-05) |
+| `Brand` | `NVARCHAR(100)` | No | Type of form, e.g. `HCR Santé` |
+| `Branch` | `NVARCHAR(200)` | No | Professional branch, e.g. `CCN de l'immobilier` |
+| `RiskType` | `NVARCHAR(100)` | No | Risk type, e.g. `PRÉVOYANCE` |
 | `Siren` | `CHAR(9)` | No | SIREN: nine digits, `CK_DemandInformation_Siren` |
 | `ReferrerCode` | `INT` | Yes | Referrer code, e.g. `512`; `CK_DemandInformation_ReferrerCode` (≥ 0) |
-| `ReferrerNetwork` | `VARCHAR(100)` | Yes | e.g. `KLESIA` |
-| `Social` | `VARCHAR(300)` | No | Company name, e.g. `JA INVEST HOLDING 26` |
-| `LegalStatus` | `VARCHAR(200)` | No | e.g. `SOCIETE PAR ACTIONS SIMPLIFIEES` |
+| `ReferrerNetwork` | `NVARCHAR(100)` | Yes | e.g. `KLESIA` |
+| `Social` | `NVARCHAR(300)` | No | Company name, e.g. `JA INVEST HOLDING 26` |
+| `LegalStatus` | `NVARCHAR(200)` | No | e.g. `SOCIETE PAR ACTIONS SIMPLIFIEES` |
 | `HeadquarterNic` | `CHAR(5)` | Yes | NIC of the headquarter: five digits, `CK_DemandInformation_HeadquarterNic` |
-| `HeadquarterAddress` | `VARCHAR(500)` | Yes | |
+| `HeadquarterAddress` | `NVARCHAR(500)` | Yes | |
 | `HeadquarterZip` | `CHAR(5)` | Yes | Five digits, `CK_DemandInformation_HeadquarterZip` |
-| `HeadquarterCity` | `VARCHAR(200)` | Yes | |
-| `HeadquarterPhone` | `VARCHAR(30)` | Yes | |
-| `Email` | `VARCHAR(320)` | Yes | |
+| `HeadquarterCity` | `NVARCHAR(200)` | Yes | |
+| `HeadquarterPhone` | `NVARCHAR(30)` | Yes | |
+| `Email` | `NVARCHAR(320)` | Yes | |
 | `NafCode` | `CHAR(5)` | No | NAF code, four digits and one upper-case letter, e.g. `5510Z`, `CK_DemandInformation_NafCode` |
 | `Idcc` | `INT` | No | Collective agreement number, 0 to 9999, `CK_DemandInformation_Idcc` |
-| `ReferrerIdentity` | `VARCHAR(300)` | Yes | e.g. `Christine Paul` |
-| `ReferrerEmail` | `VARCHAR(320)` | Yes | |
-| `EffectDateDesired` | `VARCHAR(50)` | Yes | Free text for now: **a string, not a date** (no parsing, no format check) |
-| `CoveredCategory` | `VARCHAR(200)` | No | People category to cover, e.g. `Non cadres` |
+| `ReferrerIdentity` | `NVARCHAR(300)` | Yes | e.g. `Christine Paul` |
+| `ReferrerEmail` | `NVARCHAR(320)` | Yes | |
+| `EffectDateDesired` | `NVARCHAR(50)` | Yes | Free text for now: **a string, not a date** (no parsing, no format check) |
+| `CoveredCategory` | `NVARCHAR(200)` | No | People category to cover, e.g. `Non cadres` |
 | `CoveredAmount` | `INT` | No | Number of people to cover, at least 1, `CK_DemandInformation_CoveredAmount` |
 | `EstablishmentSiret` | `CHAR(14)` | No | SIRET: fourteen digits starting with `Siren`, `CK_DemandInformation_Siret`, `CK_DemandInformation_SiretSiren` |
-| `EstablishmentDesignation` | `VARCHAR(300)` | Yes | |
+| `EstablishmentDesignation` | `NVARCHAR(300)` | Yes | |
 | `EstablishmentZip` | `CHAR(5)` | Yes | Five digits, `CK_DemandInformation_EstablishmentZip` |
-| `Contribution` | `VARCHAR(200)` | No | Information about the contribution, e.g. `0,85% TA` |
+| `Contribution` | `NVARCHAR(200)` | No | Information about the contribution, e.g. `0,85% TA` |
 
 The Luhn checksums of SIREN and SIRET are verified by the application (EXT-05), not by the database: the checks above are the second line of defence for format only. A `CHECK` on a nullable column passes when the value is `NULL`.
 
@@ -312,230 +307,291 @@ The Luhn checksums of SIREN and SIRET are verified by the application (EXT-05), 
 
 One row per formula chosen in the PDF (`formulas` of EXT-04). A demand information record has one or many formulas; the formulas of a record keep the order of the JSON array (`Id` ascending).
 
-| Column | MySQL type | Null | Rules |
+| Column | SQL Server type | Null | Rules |
 |---|---|---|---|
-| `Id` | `INT AUTO_INCREMENT` | No | Primary key |
-| `DemandInformationId` | `INT` | No | `FK_DemandFormula_DemandInformation` → `DemandInformation(Id)`; indexed by `IX_DemandFormula_DemandInformationId` |
-| `Name` | `VARCHAR(300)` | No | Name of the chosen formula, e.g. `BASE CCN – Contrat conventionnel`; not blank, `CK_DemandFormula_Name` |
-| `Detail` | `VARCHAR(1000)` | Yes | Information about the formula, e.g. `Salarié seul / Famille / …` |
+| `Id` | `INT IDENTITY(1,1)` | No | Primary key (`PK_DemandFormula`) |
+| `DemandInformationId` | `INT` | No | `FK_DemandFormula_DemandInformation` → `dbo.DemandInformation(Id)`; indexed by `IX_DemandFormula_DemandInformationId` |
+| `Name` | `NVARCHAR(300)` | No | Name of the chosen formula, e.g. `BASE CCN – Contrat conventionnel`; not blank, `CK_DemandFormula_Name` |
+| `Detail` | `NVARCHAR(1000)` | Yes | Information about the formula, e.g. `Salarié seul / Famille / …` |
 
 Neither table has `ON DELETE` actions (DB-09): nothing deletes demands, so nothing cascades.
 
-### 3.4 Normative MySQL DDL baseline
+### 3.4 Normative SQL DDL baseline
 
-The database project MUST keep every table in its own migration script, as listed in §3.5. These definitions are the baseline that the files in `database/Klesia.Database/Migrations/` implement; formatting and comments may be adjusted without changing semantics. There are no schema scripts: MySQL has no schemas inside a database (DB-02).
+The SQL project MUST keep schemas and tables in separate files, as listed in §3.5. These definitions are the baseline that the files in `database/Klesia.Database/` implement; formatting may be adjusted without changing semantics.
 
-**`Migrations/0001_Create_sec_Role.sql`**
+**`Schemas/sec.sql`** and **`Schemas/ref.sql`**
 
 ```sql
-CREATE TABLE `sec_Role`
+CREATE SCHEMA [sec] AUTHORIZATION [dbo]
+GO
+```
+
+```sql
+CREATE SCHEMA [ref] AUTHORIZATION [dbo]
+```
+
+**`Tables/sec/Role.sql`**
+
+```sql
+CREATE TABLE [sec].[Role]
 (
-    `Id`   INT          NOT NULL AUTO_INCREMENT,
-    `Name` VARCHAR(300) NOT NULL,
-    `Code` VARCHAR(50)  NOT NULL,
-    PRIMARY KEY (`Id`),
-    CONSTRAINT `AK_Role_Code` UNIQUE (`Code`)
-) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci;
+    [Id] INT IDENTITY(1,1) NOT NULL,
+    [Name] NVARCHAR(300) NOT NULL,
+    [Code] NVARCHAR(50) NOT NULL,
+    CONSTRAINT [PK_Role] PRIMARY KEY CLUSTERED ([Id]),
+    CONSTRAINT [AK_Role_Code] UNIQUE ([Code])
+);
 ```
 
-**`Migrations/0002_Create_ref_Status.sql`**
+**`Tables/sec/User.sql`**
 
 ```sql
-CREATE TABLE `ref_Status`
+CREATE TABLE [sec].[User]
 (
-    `Id`          INT          NOT NULL AUTO_INCREMENT,
-    `Name`        VARCHAR(100) NOT NULL,
-    `DisplayName` VARCHAR(100) NOT NULL,
-    `Code`        VARCHAR(20)  NOT NULL,
-    `Description` VARCHAR(500) NULL,
-    PRIMARY KEY (`Id`),
-    CONSTRAINT `AK_Status_Code` UNIQUE (`Code`),
-    CONSTRAINT `CK_Status_Code` CHECK (`Code` COLLATE utf8mb4_bin IN ('pending', 'ok', 'fail'))
-) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci;
+    [Id] INT IDENTITY(1,1) NOT NULL,
+    [UserUniqueId] UNIQUEIDENTIFIER NOT NULL,
+    [RoleId] INT NOT NULL CONSTRAINT [DF_User_RoleId] DEFAULT 1,
+    [Name] NVARCHAR(300) NOT NULL,
+    [Email] NVARCHAR(300) NOT NULL,
+    [IsInternal] BIT NOT NULL CONSTRAINT [DF_User_IsInternal] DEFAULT 1,
+    [IsActive] BIT NOT NULL CONSTRAINT [DF_User_IsActive] DEFAULT 1,
+    CONSTRAINT [PK_User] PRIMARY KEY CLUSTERED ([Id]),
+    CONSTRAINT [AK_User_UserUniqueId] UNIQUE ([UserUniqueId]),
+    CONSTRAINT [FK_User_Role] FOREIGN KEY ([RoleId]) REFERENCES [sec].[Role] ([Id])
+);
+GO
+
+CREATE NONCLUSTERED INDEX [IX_User_RoleId]
+    ON [sec].[User] ([RoleId]);
+GO
 ```
 
-**`Migrations/0003_Create_sec_User.sql`**
+The index `IX_User` that existed on `Id` (the primary key) was removed as redundant and replaced by `IX_User_RoleId`, which supports the `FK_User_Role` foreign key (DB-05).
+
+**`Tables/ref/Status.sql`**
 
 ```sql
-CREATE TABLE `sec_User`
+CREATE TABLE [ref].[Status]
 (
-    `Id`           INT          NOT NULL AUTO_INCREMENT,
-    `UserUniqueId` CHAR(36)     NOT NULL,
-    `RoleId`       INT          NOT NULL DEFAULT 1,
-    `Name`         VARCHAR(300) NOT NULL,
-    `Email`        VARCHAR(300) NOT NULL,
-    `IsInternal`   TINYINT(1)   NOT NULL DEFAULT 1,
-    `IsActive`     TINYINT(1)   NOT NULL DEFAULT 1,
-    PRIMARY KEY (`Id`),
-    CONSTRAINT `AK_User_UserUniqueId` UNIQUE (`UserUniqueId`),
-    KEY `IX_User_RoleId` (`RoleId`),
-    CONSTRAINT `FK_User_Role` FOREIGN KEY (`RoleId`) REFERENCES `sec_Role` (`Id`),
-    CONSTRAINT `CK_User_UserUniqueId` CHECK
-        (REGEXP_LIKE(`UserUniqueId`, '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')),
-    CONSTRAINT `CK_User_Flags` CHECK (`IsInternal` IN (0, 1) AND `IsActive` IN (0, 1))
-) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci;
+    [Id] INT IDENTITY(1,1) NOT NULL,
+    [Name] NVARCHAR(100) NOT NULL,
+    [DisplayName] NVARCHAR(100) NOT NULL,
+    [Code] NVARCHAR(20) NOT NULL,
+    [Description] NVARCHAR(500) NULL,
+    CONSTRAINT [PK_Status] PRIMARY KEY CLUSTERED ([Id]),
+    CONSTRAINT [AK_Status_Code] UNIQUE ([Code]),
+    CONSTRAINT [CK_Status_Code] CHECK
+        ([Code] COLLATE Latin1_General_100_BIN2 IN (N'pending', N'ok', N'fail'))
+);
+GO
 ```
 
-The index `IX_User_RoleId` supports the `FK_User_Role` foreign key (DB-05); no index duplicates the primary key.
-
-**`Migrations/0004_Create_Demand.sql`**
+**`Tables/dbo/Demand.sql`**
 
 ```sql
-CREATE TABLE `Demand`
+CREATE TABLE [dbo].[Demand]
 (
-    `Id`       INT           NOT NULL AUTO_INCREMENT,
-    `UserId`   INT           NOT NULL,
-    `GKNumber` CHAR(18)      NOT NULL,
-    `BaeLink`  VARCHAR(2048) NOT NULL,
-    `StatusId` INT           NOT NULL,
-    PRIMARY KEY (`Id`),
-    KEY `IX_Demand_UserId` (`UserId`, `Id` DESC),
-    KEY `IX_Demand_StatusId` (`StatusId`),
-    CONSTRAINT `FK_Demand_User` FOREIGN KEY (`UserId`) REFERENCES `sec_User` (`Id`),
-    CONSTRAINT `FK_Demand_Status` FOREIGN KEY (`StatusId`) REFERENCES `ref_Status` (`Id`),
-    CONSTRAINT `CK_Demand_GKNumber` CHECK
-        (REGEXP_LIKE(`GKNumber`, '^GK[0-9]{6}-[0-9]{9}$', 'c') AND CHAR_LENGTH(`GKNumber`) = 18),
-    CONSTRAINT `CK_Demand_BaeLink` CHECK (`BaeLink` LIKE 'https://%')
-) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci;
+    [Id] INT IDENTITY(1,1) NOT NULL,
+    [UserId] INT NOT NULL,
+    [GKNumber] CHAR(18) NOT NULL,
+    [BaeLink] NVARCHAR(2048) NOT NULL,
+    [StatusId] INT NOT NULL,
+    [CreatedAt] DATETIME2(6) NOT NULL CONSTRAINT [DF_Demand_CreatedAt] DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT [PK_Demand] PRIMARY KEY CLUSTERED ([Id]),
+    CONSTRAINT [FK_Demand_User] FOREIGN KEY ([UserId]) REFERENCES [sec].[User] ([Id]),
+    CONSTRAINT [FK_Demand_Status] FOREIGN KEY ([StatusId]) REFERENCES [ref].[Status] ([Id]),
+    CONSTRAINT [CK_Demand_GKNumber] CHECK
+        ([GKNumber] COLLATE Latin1_General_100_BIN2 LIKE 'GK[0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'),
+    CONSTRAINT [CK_Demand_BaeLink] CHECK ([BaeLink] LIKE N'https://%')
+);
+GO
+
+CREATE NONCLUSTERED INDEX [IX_Demand_UserId]
+    ON [dbo].[Demand] ([UserId], [Id] DESC);
+GO
+
+CREATE NONCLUSTERED INDEX [IX_Demand_StatusId]
+    ON [dbo].[Demand] ([StatusId]);
+GO
 ```
 
-**Implementation notes:** `IX_Demand_UserId` leads with the foreign-key column (DB-05) and its descending `Id` serves the API ordering `Id DESC` without a sort. No `ON DELETE CASCADE` clause is permitted. The HTTPS `CHECK` is a simple guard only; code must separately parse and validate URLs. No speculative field or check is to be added beyond what this document states. `CreatedAt` is added to this table by migration `0005`.
+**Implementation notes:** `IX_Demand_UserId` leads with the foreign-key column (DB-05) and its descending `Id` serves the API ordering `Id DESC` without a sort. No `ON DELETE CASCADE` clause is permitted. The HTTPS `CHECK` is a simple guard only; code must separately parse and validate URLs. No speculative field or check is to be added beyond what this document states. `CreatedAt` (DEC-23) is filled by its default for new rows and, when the project is published over an existing table, for the rows that already exist (the time of the publish); a legacy `pending` row without extraction is picked up by the recovery sweep (EXT-09) and ends `ok` or `fail` like any other.
 
-**`Migrations/0005_Alter_Demand_Add_CreatedAt.sql`** — adds the creation time to the table created by `0004` (an applied script is immutable, DB-14). The default fills the rows that already exist with the time of the migration; a legacy `pending` row without extraction is picked up by the recovery sweep (EXT-09) and ends `ok` or `fail` like any other.
-
-```sql
-ALTER TABLE `Demand`
-    ADD COLUMN `CreatedAt` DATETIME(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6));
-```
-
-**`Migrations/0006_Create_DemandInformation.sql`**
+**`Tables/dbo/DemandInformation.sql`**
 
 ```sql
-CREATE TABLE `DemandInformation`
+CREATE TABLE [dbo].[DemandInformation]
 (
-    `Id`                        INT          NOT NULL AUTO_INCREMENT,
-    `DemandId`                  INT          NOT NULL,
-    `Brand`                     VARCHAR(100) NOT NULL,
-    `Branch`                    VARCHAR(200) NOT NULL,
-    `RiskType`                  VARCHAR(100) NOT NULL,
-    `Siren`                     CHAR(9)      NOT NULL,
-    `ReferrerCode`              INT          NULL,
-    `ReferrerNetwork`           VARCHAR(100) NULL,
-    `Social`                    VARCHAR(300) NOT NULL,
-    `LegalStatus`               VARCHAR(200) NOT NULL,
-    `HeadquarterNic`            CHAR(5)      NULL,
-    `HeadquarterAddress`        VARCHAR(500) NULL,
-    `HeadquarterZip`            CHAR(5)      NULL,
-    `HeadquarterCity`           VARCHAR(200) NULL,
-    `HeadquarterPhone`          VARCHAR(30)  NULL,
-    `Email`                     VARCHAR(320) NULL,
-    `NafCode`                   CHAR(5)      NOT NULL,
-    `Idcc`                      INT          NOT NULL,
-    `ReferrerIdentity`          VARCHAR(300) NULL,
-    `ReferrerEmail`             VARCHAR(320) NULL,
-    `EffectDateDesired`         VARCHAR(50)  NULL,
-    `CoveredCategory`           VARCHAR(200) NOT NULL,
-    `CoveredAmount`             INT          NOT NULL,
-    `EstablishmentSiret`        CHAR(14)     NOT NULL,
-    `EstablishmentDesignation`  VARCHAR(300) NULL,
-    `EstablishmentZip`          CHAR(5)      NULL,
-    `Contribution`              VARCHAR(200) NOT NULL,
-    PRIMARY KEY (`Id`),
-    CONSTRAINT `AK_DemandInformation_DemandId` UNIQUE (`DemandId`),
-    CONSTRAINT `FK_DemandInformation_Demand` FOREIGN KEY (`DemandId`) REFERENCES `Demand` (`Id`),
-    CONSTRAINT `CK_DemandInformation_Siren` CHECK (REGEXP_LIKE(`Siren`, '^[0-9]{9}$')),
-    CONSTRAINT `CK_DemandInformation_Siret` CHECK (REGEXP_LIKE(`EstablishmentSiret`, '^[0-9]{14}$')),
-    CONSTRAINT `CK_DemandInformation_SiretSiren` CHECK (LEFT(`EstablishmentSiret`, 9) = `Siren`),
-    CONSTRAINT `CK_DemandInformation_HeadquarterNic` CHECK (REGEXP_LIKE(`HeadquarterNic`, '^[0-9]{5}$')),
-    CONSTRAINT `CK_DemandInformation_HeadquarterZip` CHECK (REGEXP_LIKE(`HeadquarterZip`, '^[0-9]{5}$')),
-    CONSTRAINT `CK_DemandInformation_EstablishmentZip` CHECK (REGEXP_LIKE(`EstablishmentZip`, '^[0-9]{5}$')),
-    CONSTRAINT `CK_DemandInformation_NafCode` CHECK (REGEXP_LIKE(`NafCode`, '^[0-9]{4}[A-Z]$', 'c')),
-    CONSTRAINT `CK_DemandInformation_Idcc` CHECK (`Idcc` BETWEEN 0 AND 9999),
-    CONSTRAINT `CK_DemandInformation_ReferrerCode` CHECK (`ReferrerCode` >= 0),
-    CONSTRAINT `CK_DemandInformation_CoveredAmount` CHECK (`CoveredAmount` >= 1)
-) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci;
+    [Id] INT IDENTITY(1,1) NOT NULL,
+    [DemandId] INT NOT NULL,
+    [Brand] NVARCHAR(100) NOT NULL,
+    [Branch] NVARCHAR(200) NOT NULL,
+    [RiskType] NVARCHAR(100) NOT NULL,
+    [Siren] CHAR(9) NOT NULL,
+    [ReferrerCode] INT NULL,
+    [ReferrerNetwork] NVARCHAR(100) NULL,
+    [Social] NVARCHAR(300) NOT NULL,
+    [LegalStatus] NVARCHAR(200) NOT NULL,
+    [HeadquarterNic] CHAR(5) NULL,
+    [HeadquarterAddress] NVARCHAR(500) NULL,
+    [HeadquarterZip] CHAR(5) NULL,
+    [HeadquarterCity] NVARCHAR(200) NULL,
+    [HeadquarterPhone] NVARCHAR(30) NULL,
+    [Email] NVARCHAR(320) NULL,
+    [NafCode] CHAR(5) NOT NULL,
+    [Idcc] INT NOT NULL,
+    [ReferrerIdentity] NVARCHAR(300) NULL,
+    [ReferrerEmail] NVARCHAR(320) NULL,
+    [EffectDateDesired] NVARCHAR(50) NULL,
+    [CoveredCategory] NVARCHAR(200) NOT NULL,
+    [CoveredAmount] INT NOT NULL,
+    [EstablishmentSiret] CHAR(14) NOT NULL,
+    [EstablishmentDesignation] NVARCHAR(300) NULL,
+    [EstablishmentZip] CHAR(5) NULL,
+    [Contribution] NVARCHAR(200) NOT NULL,
+    CONSTRAINT [PK_DemandInformation] PRIMARY KEY CLUSTERED ([Id]),
+    CONSTRAINT [AK_DemandInformation_DemandId] UNIQUE ([DemandId]),
+    CONSTRAINT [FK_DemandInformation_Demand] FOREIGN KEY ([DemandId]) REFERENCES [dbo].[Demand] ([Id]),
+    -- Fixed-length CHAR columns are space-padded: a shorter value contains a space and fails 'NOT LIKE %[^0-9]%'.
+    CONSTRAINT [CK_DemandInformation_Siren] CHECK ([Siren] NOT LIKE '%[^0-9]%'),
+    CONSTRAINT [CK_DemandInformation_Siret] CHECK ([EstablishmentSiret] NOT LIKE '%[^0-9]%'),
+    CONSTRAINT [CK_DemandInformation_SiretSiren] CHECK (LEFT([EstablishmentSiret], 9) = [Siren]),
+    CONSTRAINT [CK_DemandInformation_HeadquarterNic] CHECK ([HeadquarterNic] NOT LIKE '%[^0-9]%'),
+    CONSTRAINT [CK_DemandInformation_HeadquarterZip] CHECK ([HeadquarterZip] NOT LIKE '%[^0-9]%'),
+    CONSTRAINT [CK_DemandInformation_EstablishmentZip] CHECK ([EstablishmentZip] NOT LIKE '%[^0-9]%'),
+    CONSTRAINT [CK_DemandInformation_NafCode] CHECK
+        ([NafCode] COLLATE Latin1_General_100_BIN2 LIKE '[0-9][0-9][0-9][0-9][A-Z]'),
+    CONSTRAINT [CK_DemandInformation_Idcc] CHECK ([Idcc] BETWEEN 0 AND 9999),
+    CONSTRAINT [CK_DemandInformation_ReferrerCode] CHECK ([ReferrerCode] >= 0),
+    CONSTRAINT [CK_DemandInformation_CoveredAmount] CHECK ([CoveredAmount] >= 1)
+);
+GO
 ```
 
-**`Migrations/0007_Create_DemandFormula.sql`**
+The unique constraint `AK_DemandInformation_DemandId` also serves the foreign key `FK_DemandInformation_Demand` (DB-05), so no further index is declared.
+
+**`Tables/dbo/DemandFormula.sql`**
 
 ```sql
-CREATE TABLE `DemandFormula`
+CREATE TABLE [dbo].[DemandFormula]
 (
-    `Id`                        INT           NOT NULL AUTO_INCREMENT,
-    `DemandInformationId`       INT           NOT NULL,
-    `Name`                      VARCHAR(300)  NOT NULL,
-    `Detail`                    VARCHAR(1000) NULL,
-    PRIMARY KEY (`Id`),
-    KEY `IX_DemandFormula_DemandInformationId` (`DemandInformationId`, `Id`),
-    CONSTRAINT `FK_DemandFormula_DemandInformation` FOREIGN KEY (`DemandInformationId`) REFERENCES `DemandInformation` (`Id`),
-    CONSTRAINT `CK_DemandFormula_Name` CHECK (CHAR_LENGTH(TRIM(`Name`)) > 0)
-) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci;
+    [Id] INT IDENTITY(1,1) NOT NULL,
+    [DemandInformationId] INT NOT NULL,
+    [Name] NVARCHAR(300) NOT NULL,
+    [Detail] NVARCHAR(1000) NULL,
+    CONSTRAINT [PK_DemandFormula] PRIMARY KEY CLUSTERED ([Id]),
+    CONSTRAINT [FK_DemandFormula_DemandInformation] FOREIGN KEY ([DemandInformationId]) REFERENCES [dbo].[DemandInformation] ([Id]),
+    CONSTRAINT [CK_DemandFormula_Name] CHECK (LEN(LTRIM(RTRIM([Name]))) > 0)
+);
+GO
+
+CREATE NONCLUSTERED INDEX [IX_DemandFormula_DemandInformationId]
+    ON [dbo].[DemandFormula] ([DemandInformationId], [Id]);
+GO
 ```
 
-All three scripts are backward compatible with the previous API revision (HOST-12): a column with a default and two new tables that the previous revision ignores.
+Publishing the project over an existing database is backward compatible with the previous API revision (HOST-12): a column with a default and two new tables that the previous revision ignores.
 
 ### 3.5 Project layout, build and deployment
 
-MySQL has no declarative database project (no DACPAC, no `SqlPackage`). The `database/` folder is therefore a small **.NET migrator** based on DbUp (DEC-14): it embeds versioned SQL scripts and applies them to the target database, recording what it applied in the `SchemaVersions` table. **The migrator's scripts are the only owner of the schema.** The existing `database/` folder and its conventions are preserved. Layout:
+The existing `database/` folder and its conventions are preserved. Layout:
 
 ```text
 database/
-├── Directory.Build.props          # intentionally empty: isolates the migrator from the .NET API build settings
+├── Directory.Build.props          # intentionally empty: isolates the SQL project from the .NET build settings
 └── Klesia.Database/
-    ├── Klesia.Database.csproj     # stand-alone console project, net10.0, pinned package versions
-    ├── Program.cs                 # DbUp runner (Entra access token as password when none is supplied)
-    ├── Migrations/                # versioned DDL, run once, ordered by file name
-    │   ├── 0001_Create_sec_Role.sql
-    │   ├── 0002_Create_ref_Status.sql
-    │   ├── 0003_Create_sec_User.sql
-    │   ├── 0004_Create_Demand.sql
-    │   ├── 0005_Alter_Demand_Add_CreatedAt.sql
-    │   ├── 0006_Create_DemandInformation.sql
-    │   └── 0007_Create_DemandFormula.sql
-    └── Seeds/                     # idempotent data, run after the migrations on EVERY run
-        ├── 01_RefData.sql
-        └── 02_User.sql
+    ├── Klesia.Database.sqlproj
+    ├── PostDeployment.sql         # single aggregate post-deployment entry (project root)
+    ├── Schemas/
+    │   ├── sec.sql
+    │   └── ref.sql
+    ├── Tables/
+    │   ├── sec/
+    │   │   ├── Role.sql
+    │   │   └── User.sql
+    │   ├── ref/
+    │   │   └── Status.sql
+    │   └── dbo/
+    │       ├── Demand.sql
+    │       ├── DemandInformation.sql
+    │       └── DemandFormula.sql
+    ├── Scripts/
+    │   ├── 01_RefData.sql
+    │   └── 02_User.sql
+    └── Properties/
+        └── Azure.publish.xml
 ```
 
-**Required migrator capabilities:**
+**Required `.sqlproj` capabilities:**
 
-- A stand-alone SDK-style console project with **pinned** package versions: `dbup-mysql` (currently `6.1.0`), `MySqlConnector` (`2.4.0`) and `Azure.Identity`.
-- `Migrations/*.sql` and `Seeds/*.sql` are embedded resources. Migrations run **once** (`RunOnce`, group 1); seeds run on **every** execution (`RunAlways`, group 2), always after the migrations.
-- The deployment connection string comes from the environment variable `KLESIA_DB_DEPLOY_CONNECTION`. When it contains no `Password`, the tool obtains a Microsoft Entra access token for `https://ossrdbms-aad.database.windows.net/.default` (Azure CLI sign-in locally, a managed identity in a pipeline) and uses it as the password.
-- TLS is mandatory (`SslMode=Required` at least; `VerifyFull` once the CA chain is confirmed, OPEN-07).
-- Do not put deployment credentials in the project, in source control or in shell history.
+- Use an SDK-style project with a **pinned** `Microsoft.Build.Sql` version (currently `2.3.0`).
+- Target Azure SQL Database explicitly through `Microsoft.Data.Tools.Schema.Sql.SqlAzureV12DatabaseSchemaProvider`.
+- Build all table/schema definitions into the DACPAC as schema-model files.
+- Include only one aggregate post-deployment entry, `PostDeployment.sql`, which references `01_RefData.sql` before `02_User.sql`.
+- Exclude data scripts included by `:r` from the schema model (`Build Remove`) so they do not cause build errors or run twice.
+- Do not put deployment credentials in `.sqlproj`, `.publish.xml`, source control or shell history.
 
-**Build and apply (PowerShell, substitute a securely supplied connection string):**
+```xml
+<Project DefaultTargets="Build">
+  <Sdk Name="Microsoft.Build.Sql" Version="2.3.0" />
+  <PropertyGroup>
+    <Name>Klesia.Database</Name>
+    <DSP>Microsoft.Data.Tools.Schema.Sql.SqlAzureV12DatabaseSchemaProvider</DSP>
+    <ModelCollation>1033, CI</ModelCollation>
+  </PropertyGroup>
+  <ItemGroup>
+    <Build Remove="Scripts/**/*.sql" />
+    <Build Remove="PostDeployment.sql" />
+    <PostDeploy Include="PostDeployment.sql" />
+  </ItemGroup>
+</Project>
+```
+
+**`PostDeployment.sql`**
+
+```sql
+:r .\Scripts\01_RefData.sql
+:r .\Scripts\02_User.sql
+```
+
+**Seed scripts (DEC-05).** Both scripts run after **every** successful publish, so they are idempotent:
+
+- `01_RefData.sql` merges on the stable `Code`, never on an identity value. It guarantees the three status codes (`pending`, `ok`, `fail`) and the three confirmed roles (`admin`, `operational`, `guest`). Descriptive columns of reference rows are re-aligned by the deployment; nothing is deleted.
+- `02_User.sql` is **insert-only**, matched on the Entra `oid` (`UserUniqueId`), with the role resolved by its code. An existing row is never updated, so a user deactivated by an administrator is not reactivated and administrator-edited fields are not overwritten; no user is deleted. It seeds the project owner's account as an active `admin` user. Further authorized identities are added by appending rows to that script, always with a valid, explicitly supplied Entra `oid`.
+
+**Build:**
 
 ```powershell
-dotnet build database/Klesia.Database/Klesia.Database.csproj -c Debug
-
-$env:KLESIA_DB_DEPLOY_CONNECTION = "Server=<server>.mysql.database.azure.com;Port=3306;Database=klesia;User ID=<deployment principal>;SslMode=Required"
-dotnet run --project database/Klesia.Database -c Debug
+dotnet build database/Klesia.Database/Klesia.Database.sqlproj -c Debug
 ```
 
-**Seed scripts (DEC-05).** Both scripts run after **every** execution, so they are idempotent. They contain no `INSERT IGNORE` and no `ON DUPLICATE KEY UPDATE` (they would hide real errors and burn `AUTO_INCREMENT` values): they use an `UPDATE` join plus `INSERT … SELECT … WHERE NOT EXISTS`.
+**Publish (illustrative PowerShell; substitute a securely supplied connection string):**
 
-- `01_RefData.sql` matches on the stable `Code`, never on an identity value. It guarantees the three status codes (`pending`, `ok`, `fail`) and the three confirmed roles (`admin`, `operational`, `guest`). Descriptive columns of reference rows are re-aligned by the deployment; nothing is deleted.
-- `02_User.sql` is **insert-only**, matched on the Entra `oid` (`UserUniqueId`), with the role resolved by its code. An existing row is never updated, so a user deactivated by an administrator is not reactivated and administrator-edited fields are not overwritten; no user is deleted. It seeds the project owner's account as an active `admin` user. Further authorized identities are added by appending rows to that script, always with a valid, explicitly supplied, lower-case Entra `oid`.
+```powershell
+SqlPackage `
+  /Action:Publish `
+  /SourceFile:"database/Klesia.Database/bin/Debug/Klesia.Database.dacpac" `
+  /Profile:"database/Klesia.Database/Properties/Azure.publish.xml" `
+  /TargetConnectionString:$env:KLESIA_SQL_DEPLOY_CONNECTION
+```
 
-The target is **Azure Database for MySQL**. A disposable MySQL **8.4** instance MAY be used for automated tests; any other major version is not representative. Real secrets remain outside tracked files. The migrator only runs forward scripts and never drops objects, but it has **no** drift detection and **no** data-loss blocking (the DACPAC publish-profile safeguards of version 1.3 have no equivalent), so destructive migrations are caught in code review (DB-11).
+The target is Azure SQL Database, **not** SQL Server LocalDB. Real secrets remain outside tracked files. The publish profile keeps data-loss blocking enabled and never drops objects that are not in the source; review the generated script before applying it.
 
 ### 3.6 Database verification
 
-The following checks are mandatory (the automated ones are in `tests/IntegrationTests/Database` and run when `KLESIA_TEST_DB_CONNECTION` points to a disposable, migrated database; each test runs in a transaction that is rolled back):
+The following checks are mandatory (the automated ones are in `tests/IntegrationTests/Database` and run when `KLESIA_TEST_SQL_CONNECTION` points to a disposable published database):
 
-1. `dotnet build` of the migrator succeeds without unresolved references.
-2. Running the migrator against an **empty** Azure Database for MySQL dev/test database creates the six expected tables, the `SchemaVersions` journal and the seed rows.
-3. All `FK_*`, `AK_*`, `CK_*` and `IX_*` objects exist with the names defined by the DB-06 scheme (`information_schema.TABLE_CONSTRAINTS` and `information_schema.STATISTICS`), and every table has its `PRIMARY` key.
+1. `dotnet build` produces the `.dacpac` at the documented path without unresolved references.
+2. Publish to an **empty** Azure SQL dev/test database creates the `sec` and `ref` schemas and the six expected tables.
+3. All `PK_*`, `FK_*`, `AK_*`, `CK_*`, `DF_*` and `IX_*` objects exist with the names defined by the DB-06 scheme.
 4. Foreign keys reject orphan user-role, demand-user and demand-status references.
 5. Duplicate `Role.Code`, `Status.Code` and `User.UserUniqueId` values fail; repeated `Demand.GKNumber` values **succeed**.
-6. GK values that do not match the `GK######-#########` format (wrong prefix including lower-case `gk`, letters, short, embedded or trailing space, missing hyphen), non-HTTPS `BaeLink`, unsupported status codes (including a wrong-case `OK`), a malformed `UserUniqueId` and `IsActive`/`IsInternal` values other than 0 and 1 all fail with a check-constraint violation (error 3819).
-7. Running the migrator again applies no migration twice, creates no duplicate seed data, wipes no business records and reactivates no inactive user.
+6. GK values that do not match the `GK######-#########` format (wrong prefix, letters, short, embedded space, missing hyphen), non-HTTPS `BaeLink` and unsupported status codes fail.
+7. Re-running the publish and reference scripts does not create duplicate seed data, wipe business records or reactivate inactive users.
 8. An inactive user and a user without any demands can exist without breaking referential integrity.
-9. The server version is 8.4 (or at least 8.0.16): the check constraints in items 5 and 6 are actually enforced, not silently ignored.
-10. The extraction tables behave as specified (AT-49): a second `DemandInformation` for the same demand fails, several `DemandFormula` rows for one information succeed, orphan keys are rejected, and the SIREN, SIRET, NIC, zip, NAF, `idcc`, `referrer_code` and `covered_amount` checks reject bad values with error 3819.
-11. Migrations `0005` to `0007` apply on top of a database already migrated to `0004` that holds demands, without altering any existing row except the new `CreatedAt` default, and `Demand.CreatedAt` is filled by the database.
+9. The extraction tables behave as specified (AT-49): a second `DemandInformation` for the same demand fails, several `DemandFormula` rows for one information succeed, orphan keys are rejected, and the SIREN, SIRET, NIC, zip, NAF, `idcc`, `referrer_code` and `covered_amount` checks reject bad values (constraint violation, error 547).
+10. Publishing the project over a database that already holds demands adds `Demand.CreatedAt` and the two extraction tables without altering any existing row, and `Demand.CreatedAt` is filled by its database default.
 
 ## 4. Authentication and authorization
 
@@ -578,7 +634,7 @@ required scope present in scp ................................. else 403
    extract token.oid ..... missing / not a GUID ............... 401
          |
          v
-SELECT sec_User WHERE UserUniqueId = oid   (parameterized)
+SELECT sec.User WHERE UserUniqueId = oid   (parameterized)
          |
          +-- not found ----------> 403 Forbidden
          +-- IsActive = 0 -------> 403 Forbidden   (identical response)
@@ -586,12 +642,12 @@ SELECT sec_User WHERE UserUniqueId = oid   (parameterized)
                                     (internal SQL User.Id)
 ```
 
-- A row in `sec_User` is an **allowlist entry**, not a provisioning request.
+- A row in `sec.User` is an **allowlist entry**, not a provisioning request.
 - `IsActive = 0` means denied, even with a cryptographically valid Entra token.
-- **The only authorization rule is *own data only*** (OPEN-04): the authorized user receives exclusively the demands whose `Demand.UserId` equals their own `sec_User.Id`.
+- **The only authorization rule is *own data only*** (OPEN-04): the authorized user receives exclusively the demands whose `Demand.UserId` equals their own `sec.User.Id`.
 - `IsInternal` is **not** an access gate; it is informational until business rules are defined.
-- `RoleId` must reference an existing `sec_Role` but grants **no elevated access and removes none**.
-- Do not create or update `sec_User` automatically during a request.
+- `RoleId` must reference an existing `sec.Role` but grants **no elevated access and removes none**.
+- Do not create or update `sec.User` automatically during a request.
 - Do not authorize using name, email, Entra group membership, frontend claims about roles or client-supplied user IDs.
 - 403 responses MUST NOT disclose whether the account is unknown or disabled: same status, same title, same body shape.
 - The background extraction (§7.3) has no caller and no token: it only acts on a demand created by an authorized request, takes its inputs from the database and SharePoint and never from a client. The owner of a demand is always the token's user (DEC-20).
@@ -606,7 +662,7 @@ This table is the single authority for authentication/authorization outcomes; §
 | Invalid signature, wrong issuer, wrong tenant (`iss` or `tid`), wrong audience, expired token, ID token | `401` | Authentication invalid |
 | Valid token, `oid` claim missing or not a GUID | `401` | Identity cannot be established; fail closed |
 | Valid token without the required delegated scope (including application-only tokens without `scp`) | `403` | Authentication valid, permission insufficient |
-| Valid token and scope, user not present in `sec_User` | `403` | Not authorized |
+| Valid token and scope, user not present in `sec.User` | `403` | Not authorized |
 | Valid token and scope, user present with `IsActive = 0` | `403` | Not authorized |
 | Valid token and scope, active user present | Continue | Allowed to see **only own demands** |
 | SQL dependency failure or other server fault | `5xx` | Service fault; never mislabel as `403` |
@@ -648,13 +704,13 @@ Accept: application/json
 
 | JSON property | Type | Source / rule |
 |---|---|---|
-| `user_id` | string | Normalized GUID from validated Entra `oid` / matched `sec_User.UserUniqueId`. **Not** `sec_User.Id`. |
-| `user_name` | string | `sec_User.Name` from matched active DB row. |
-| `demands` | array | All demand rows whose `Demand.UserId` is the matched internal `sec_User.Id` (zero or more). |
+| `user_id` | string | Normalized GUID from validated Entra `oid` / matched `sec.User.UserUniqueId`. **Not** `sec.User.Id`. |
+| `user_name` | string | `sec.User.Name` from matched active DB row. |
+| `demands` | array | All demand rows whose `Demand.UserId` is the matched internal `sec.User.Id` (zero or more). |
 | `demands[].demand_id` | integer | `Demand.Id`. |
 | `demands[].gk_number` | string | `Demand.GKNumber`, returned unchanged (e.g. `GK260902-144743112`). No formatting is applied. |
 | `demands[].bae_link` | string | `Demand.BaeLink`: the **HTTPS URL** of the corresponding PDF in SharePoint, validated by the backend. It opens in the browser with the user's own SharePoint/Entra session, without a frontend-provided bearer Authorization header. |
-| `demands[].status` | string enum | `ref_Status.Code`, exclusively `pending`, `ok`, `fail` (DEC-19). |
+| `demands[].status` | string enum | `ref.Status.Code`, exclusively `pending`, `ok`, `fail` (DEC-19). |
 
 **Empty list is valid** and still returns `200`:
 
@@ -669,8 +725,8 @@ Accept: application/json
 **Backend processing rules:**
 
 1. Authenticate bearer token and require the configured delegated scope.
-2. Resolve an active `sec_User` using validated `oid`; otherwise return `403`.
-3. Read demands only where `Demand.UserId = sec_User.Id`; join `ref_Status` by `StatusId`.
+2. Resolve an active `sec.User` using validated `oid`; otherwise return `403`.
+3. Read demands only where `Demand.UserId = sec.User.Id`; join `ref.Status` by `StatusId`.
 4. Map the response to exactly the specified snake_case field names and types; no database rows or domain objects serialized directly, and no extracted data (DEC-22).
 5. Return the stored GK number unchanged (no formatting).
 6. Return the stored status code verbatim (from the three allowed lowercase codes).
@@ -716,7 +772,7 @@ Backend settings are bound as strongly typed options and validated at startup: t
 | Area | Configuration key(s) and rules |
 |---|---|
 | Entra ID | `AzureAd:Instance` (default `https://login.microsoftonline.com/`), `AzureAd:TenantId`, `AzureAd:ClientId`, `AzureAd:RequiredScope` (scope name only; fixed to `access_as_user` by the contract, DEC-11), optional `AzureAd:Audiences`. All mandatory; placeholders are rejected at startup. |
-| Database | `ConnectionStrings:KlesiaDb`, for example `Server=<server>.mysql.database.azure.com;Port=3306;Database=klesia;User ID=<entra user name>;SslMode=Required;ConnectionTimeout=30` (no `Password`). With no `Password` the API acquires a Microsoft Entra token (DEC-06), so no password is stored: on a developer PC it signs in with the Azure CLI (`az login`) or Visual Studio account, in Azure with the user-assigned managed identity (environment variable `AZURE_CLIENT_ID` of the container app, HOST-06). Prerequisites: the client IP is allowed in the server firewall (or private access is configured), TLS is used, and the Entra identity is a database user created by the Entra administrator (`CREATE AADUSER`, see `docs/local-development.md`) with the privileges of §6.2 on the six tables. |
+| Database | `ConnectionStrings:KlesiaDb`. Use `Authentication=Active Directory Default;Encrypt=True` so no password is stored: on a developer PC it signs in with the Azure CLI (`az login`) or Visual Studio account, in Azure with the user-assigned managed identity (environment variable `AZURE_CLIENT_ID` of the container app, HOST-06). Prerequisites: the client IP is allowed in the Azure SQL firewall (or a private endpoint is configured), and the Entra identity is a database user created with `CREATE USER [name] FROM EXTERNAL PROVIDER` that holds the privileges of §6.2 on the six tables (see `docs/local-development.md`). |
 | Frontend | `Cors:AllowedOrigins` — array of exact origins (`http://localhost:5173`, the deployed Static Web App URL). Validated at startup: no path, HTTPS required except loopback, `*` forbidden. Empty means no cross-origin access. |
 | Configuration sources | Precedence, lowest to highest: `appsettings.json` (empty values, tracked) → `appsettings.{Environment}.json` (placeholders, tracked) → `appsettings.Local.json` (personal values, **git-ignored**) → environment variables (`AzureAd__TenantId`, `Cors__AllowedOrigins__0`, `ConnectionStrings__KlesiaDb`); in Azure they are set on the container app (HOST-07). |
 | Logging | Log level, correlation id (`X-Correlation-Id`, generated when absent or unsafe), telemetry backend if already used. |
@@ -725,7 +781,7 @@ Backend settings are bound as strongly typed options and validated at startup: t
 | Document Intelligence (DEC-18) | `DocumentIntelligence:Endpoint` and `DocumentIntelligence:ModelId` (both mandatory, placeholders rejected at startup), optional `DocumentIntelligence:TimeoutSeconds` (default `120`) and `DocumentIntelligence:ApiVersion`. Access with the managed identity (*Cognitive Services User* on the resource), no key. |
 | Extraction (§7.3) | `Extraction:MaxConcurrency` (default `2`), `Extraction:QueueCapacity` (default `100`), `Extraction:StaleAfterMinutes` (default `15`, greater than the Document Intelligence timeout), `Extraction:SweepIntervalMinutes` (default `5`). Optional; invalid values are rejected at startup. |
 
-Store credentials and connection secrets in environment-specific secret stores or managed identity configuration. Avoid checking credentials into `appsettings.json`, `.env` tracked files, Bicep parameter defaults, migrator connection strings, examples, log files or simulator artifacts.
+Store credentials and connection secrets in environment-specific secret stores or managed identity configuration. Avoid checking credentials into `appsettings.json`, `.env` tracked files, Bicep parameter defaults, `Azure.publish.xml`, examples, log files or simulator artifacts.
 
 ### 6.2 Logs and operational behavior
 
@@ -733,27 +789,27 @@ Store credentials and connection secrets in environment-specific secret stores o
 - Log exceptions on the server with appropriate access controls; provide generic client errors.
 - Fail closed on authentication/authorization failures; fail with `5xx` on actual database outages.
 - Parameterize every SQL query through Dapper parameters. Never interpolate or concatenate `oid` or any user input into SQL text.
-- Backend SQL credentials/managed identity SHOULD have minimum runtime permissions: `SELECT` on the six tables, `INSERT` on `Demand`, `DemandInformation` and `DemandFormula`, and `UPDATE` on the single column `Demand.StatusId` (column-level grant). No `DELETE`, no other `UPDATE` and no DDL; database-schema deployment uses a distinct, more privileged principal.
+- Backend SQL credentials/managed identity SHOULD have minimum runtime permissions: read access to the six tables (`db_datareader`), `INSERT` on `dbo.Demand`, `dbo.DemandInformation` and `dbo.DemandFormula`, and `UPDATE` on the single column `dbo.Demand.StatusId` (column-level grant). No `DELETE`, no other `UPDATE` and no DDL; database-schema deployment uses a distinct, more privileged principal.
 - Test CORS behavior from the frontend origin, including `OPTIONS` preflight and rejected authentication.
 
 ### 6.3 Hosting on Azure Container Apps (DEC-15)
 
-The API runs as one **container app** with HTTP ingress in an Azure Container Apps environment, next to Azure Database for MySQL (DEC-14); the frontend stays on Azure Static Web Apps. Items tagged *(OPEN-08)* are decisions of the customer's DSI and are never hard-coded.
+The API runs as one **container app** with HTTP ingress in an Azure Container Apps environment, next to Azure SQL Database (DEC-14); the frontend stays on Azure Static Web Apps. Items tagged *(OPEN-08)* are decisions of the customer's DSI and are never hard-coded.
 
 | ID | Requirement |
 |---|---|
-| HOST-01 | **Image.** A multi-stage `Dockerfile` at the repository root: the .NET 10 SDK image restores and publishes `src/WebApi`; the final stage is the ASP.NET Core 10 runtime image. The image holds only the published API: never the migrator, tests, `.claude/`, docs, `appsettings.Local.json`, `bin/`, `obj/` or `.git` (enforced by `.dockerignore`), and **no secret or tenant-specific value**. Base images are pinned to a major.minor tag verified at implementation time. Deployed images are tagged with the commit SHA (immutable); `latest` is never deployed. |
+| HOST-01 | **Image.** A multi-stage `Dockerfile` at the repository root: the .NET 10 SDK image restores and publishes `src/WebApi`; the final stage is the ASP.NET Core 10 runtime image. The image holds only the published API: never the SQL project, tests, `.claude/`, docs, `appsettings.Local.json`, `bin/`, `obj/` or `.git` (enforced by `.dockerignore`), and **no secret or tenant-specific value**. Base images are pinned to a major.minor tag verified at implementation time. Deployed images are tagged with the commit SHA (immutable); `latest` is never deployed. |
 | HOST-02 | **Port and user.** The process listens on plain HTTP `8080` (`ASPNETCORE_HTTP_PORTS=8080`, the default of the ASP.NET Core 8+ images) and runs as a **non-root** user. The ingress target port is `8080`. No certificate, no `UseHttps` and no Kestrel TLS in the container. |
 | HOST-03 | **Ingress and TLS.** TLS 1.2/1.3 ends at the Container Apps ingress, and port 80 is redirected to HTTPS by the ingress. Exposure (external or internal), IP restrictions and custom domain are *(OPEN-08c)*. The **ingress CORS policy stays disabled**: the only CORS policy is the API's (§5.2), so two policies can never disagree. |
 | HOST-04 | **Forwarded headers.** `UseForwardedHeaders` is registered first in the pipeline with `ForwardedHeaders.XForwardedFor \| ForwardedHeaders.XForwardedProto`. Because the ingress is the only network entry point, `KnownNetworks` and `KnownProxies` are cleared (Microsoft's guidance for Container Apps); this is acceptable only while nothing else can reach port 8080. The client address is the **rightmost** `X-Forwarded-For` value, the others are not trusted. Any HTTPS-redirection or HSTS logic relies on the forwarded protocol, so it never loops. |
-| HOST-05 | **Probes.** *Startup* and *readiness*: HTTP GET `/health` on port 8080 (§5.3). *Liveness*: **TCP** on port 8080, not `/health`: `/health` answers `503` when MySQL is down, and restarting a replica does not repair a database outage. Thresholds leave the first request time to acquire the Entra token and open the TLS connection to MySQL *(OPEN-08e)*. No route is added for probes. |
-| HOST-06 | **Identity.** One **user-assigned managed identity** is attached to the container app. Its client id is the environment variable `AZURE_CLIENT_ID`, so `DefaultAzureCredential` selects it (DEC-06). The same identity is the MySQL database user (`docs/local-development.md`), the Graph identity for SharePoint (`Sites.Selected`, DEC-13), the Document Intelligence identity (DEC-18) and the SignalR identity (§8.1). A registry, if used, is pulled with `AcrPull` *(OPEN-08d)*. No client secret, certificate or database password exists anywhere. |
+| HOST-05 | **Probes.** *Startup* and *readiness*: HTTP GET `/health` on port 8080 (§5.3). *Liveness*: **TCP** on port 8080, not `/health`: `/health` answers `503` when the database is down, and restarting a replica does not repair a database outage. Thresholds leave the first request time to acquire the Entra token and open the TLS connection to Azure SQL Database *(OPEN-08e)*. No route is added for probes. |
+| HOST-06 | **Identity.** One **user-assigned managed identity** is attached to the container app. Its client id is the environment variable `AZURE_CLIENT_ID`, so `DefaultAzureCredential` selects it (DEC-06). The same identity is the Azure SQL database user (`docs/local-development.md`), the Graph identity for SharePoint (`Sites.Selected`, DEC-13), the Document Intelligence identity (DEC-18) and the SignalR identity (§8.1). A registry, if used, is pulled with `AcrPull` *(OPEN-08d)*. No client secret, certificate or database password exists anywhere. |
 | HOST-07 | **Configuration and secrets.** Settings are environment variables of the container app in the `Section__Key` form of §6.1 (`AzureAd__TenantId`, `Cors__AllowedOrigins__0`, `ConnectionStrings__KlesiaDb`, ...). The API needs **no secret** (passwordless database access, public Entra metadata). Should one ever appear, it is a Container Apps secret (optionally a Key Vault reference resolved through the managed identity) exposed as an environment variable: never in the image, the repository, Bicep parameter defaults or logs. |
 | HOST-08 | **Stateless replicas.** Any replica can serve any request: no in-memory session, no cache that affects correctness, no file written to the container disk (the PDF is streamed to SharePoint, DEC-13, and streamed back for the extraction, EXT-02). The background extraction runs in whichever replica accepted the request but holds no state that matters: the queue carries only a demand id, every result and every status is in the database, the recovery sweep re-queues anything left `pending` (EXT-09) and concurrent workers are reconciled by the database (EXT-06). The JWT bearer API uses no cookies, so no data-protection key ring and no sticky session is needed; SignalR runs on the Azure SignalR Service (§8.1), not inside the container. |
 | HOST-09 | **Scaling and resources.** Replica bounds, the scaling rule (HTTP concurrency by default) and CPU/memory are infrastructure settings *(OPEN-08e)*. The API must work with 0 to N replicas and stop cleanly on SIGTERM (host shutdown) so that a revision change drains in-flight requests and cancels the extractions in progress (EXT-08). Requests stay well under the 240 s ingress timeout *(OPEN-08f)*. |
 | HOST-10 | **Logs.** Console only, no file sink; Container Apps ships them to Log Analytics. The rules of §6.2 apply unchanged. |
-| HOST-11 | **Network to MySQL.** The container app reaches the MySQL server on port 3306 with TLS (OPEN-07b, OPEN-08b). The firewall-rule approach of local development does not carry over to Azure, because the outbound addresses of the environment are not a stable allowlist. |
-| HOST-12 | **Delivery pipeline (GitHub Actions).** On the main branch: restore, build, test, then build the image, push it to the registry, **run the DbUp migrator as a pipeline step** with the deployment principal (`KLESIA_DB_DEPLOY_CONNECTION`, Entra token, DB-11), deploy a new revision with the SHA-tagged image, run a smoke test (`GET /health` answers `200`, AT-22) and keep the previous revision available for rollback. The pipeline signs in to Azure with an **OpenID Connect federated credential** *(OPEN-08i)*. The migrator never runs at API startup and the runtime identity keeps only the data privileges of §6.2 (no DDL). Because the previous revision keeps serving during the migration and after a rollback, every migration MUST be **backward compatible** with the previous API version (add first, remove in a later release). |
+| HOST-11 | **Network to Azure SQL Database.** The container app reaches the SQL server on port 1433 with TLS (OPEN-07a, OPEN-08b). The firewall-rule approach of local development does not carry over to Azure, because the outbound addresses of the environment are not a stable allowlist. |
+| HOST-12 | **Delivery pipeline (GitHub Actions).** On the main branch: restore, build, test, then build the image, push it to the registry, **publish the SQL project as a pipeline step** (`SqlPackage /Action:Publish` of the DACPAC) with the deployment principal (`KLESIA_SQL_DEPLOY_CONNECTION`, Entra, no stored password), deploy a new revision with the SHA-tagged image, run a smoke test (`GET /health` answers `200`, AT-22) and keep the previous revision available for rollback. The pipeline signs in to Azure with an **OpenID Connect federated credential** *(OPEN-08i)*. The SQL project is never published at API startup and the runtime identity keeps only the data privileges of §6.2 (no DDL). Because the previous revision keeps serving during the publish and after a rollback, every schema change MUST be **backward compatible** with the previous API version (add first, remove in a later release). |
 
 **Running the image on a PC.** `docker run` with the same environment variables starts the API and answers `/health`, but `DefaultAzureCredential` has no Azure CLI inside the container, so database calls fail (`503`) unless a credential is injected. Day-to-day development therefore stays on `dotnet run` (`docs/local-development.md`); the container is verified in CI and in the dev environment (AT-33 to AT-36).
 
@@ -776,7 +832,7 @@ sequenceDiagram
     participant FE as Frontend
     participant API as API (request)
     participant SP as SharePoint
-    participant DB as MySQL
+    participant DB as Azure SQL
     participant SR as Azure SignalR
     participant W as API (background worker)
     participant DI as Document Intelligence
@@ -843,7 +899,7 @@ The API sends the PDF to an Azure Document Intelligence instance whose custom mo
 | ID | Requirement |
 |---|---|
 | EXT-01 | **Hand-over and execution.** After the commit of step 1 the API puts the demand id on an in-process bounded queue (`IExtractionQueue` in `Application`, implemented in `Infrastructure` with `System.Threading.Channels`, capacity `Extraction:QueueCapacity`). A hosted service (`ExtractionWorker`) takes ids from the queue and runs at most `Extraction:MaxConcurrency` extractions at a time. The queue carries **only the demand id**, never the PDF or extracted data. Enqueuing never blocks and never fails the HTTP request: a full queue is logged and the recovery sweep (EXT-09) picks the demand up later. No correctness depends on what a replica holds in memory (HOST-08). |
-| EXT-02 | **Load and guard.** The worker reads by id the demand's status, its `BaeLink` and the owner's `oid` (`sec_User.UserUniqueId`). It proceeds only if the status is `pending` **and** no `DemandInformation` exists for the demand; otherwise it stops silently (another replica or the sweep already handled it). It then opens the PDF from SharePoint through `IBaeDocumentStore` as a stream (read access with the same identity as the copy, DEC-13). Nothing is written to the container disk. |
+| EXT-02 | **Load and guard.** The worker reads by id the demand's status, its `BaeLink` and the owner's `oid` (`sec.User.UserUniqueId`). It proceeds only if the status is `pending` **and** no `DemandInformation` exists for the demand; otherwise it stops silently (another replica or the sweep already handled it). It then opens the PDF from SharePoint through `IBaeDocumentStore` as a stream (read access with the same identity as the copy, DEC-13). Nothing is written to the container disk. |
 | EXT-03 | **Call.** `IDocumentExtractor.ExtractAsync(Stream pdf, CancellationToken)` returns the parsed answer. Its `Infrastructure` implementation calls Azure Document Intelligence with the endpoint and the model id of the configuration (`DocumentIntelligence:Endpoint`, `DocumentIntelligence:ModelId`), waits for the analysis to complete within `DocumentIntelligence:TimeoutSeconds` and passes the cancellation token. Only the Azure SDK's built-in retry policy for transient faults applies: the application adds no retry of its own. |
 | EXT-04 | **Answer contract.** The service answers with the JSON below (field meanings in the comments). Parsing is strict about types: a value of the wrong JSON type, an unreadable body or an empty body is a failure (EXT-07). Unknown properties are ignored. A `null`, a missing property or a blank string is an *absent* value; strings are trimmed before use. See the table after the block. |
 
@@ -970,7 +1026,7 @@ Success: `200 OK`:
 Both send the same event with the same empty payload: the frontend reloads `GET /api/v1/demands` on every event, never reads the payload, and learns the outcome from the `status` of the demand (BE-02, RT-03 of the webapp specification). A distinct event name or a payload would be a contract change.
 
 - **NOT-01 Publisher port.** `Application` declares `INotifier` (one operation: tell the user identified by an Entra `oid` that their demands changed). `Infrastructure` implements it with the Azure SignalR Service REST API in Serverless mode (hub `demands`, user-targeted message, managed identity, no access key). Callers never see SignalR types.
-- **NOT-02 Recipient.** The `oid` given to the notifier is the one of the validated token (N-1) or the `sec_User.UserUniqueId` of the demand's owner read from the database (N-2), never client input. The message goes to that user only; demand activity is **never broadcast**.
+- **NOT-02 Recipient.** The `oid` given to the notifier is the one of the validated token (N-1) or the `sec.User.UserUniqueId` of the demand's owner read from the database (N-2), never client input. The message goes to that user only; demand activity is **never broadcast**.
 - **NOT-03 Best effort, after the commit.** The notifier is called only after the database change is committed. A failure (SignalR unavailable, timeout) is logged without user data and **never** changes the HTTP result, the status of the demand or the extraction outcome; the frontend recovers by reloading on every (re)connection. The call has a short timeout.
 - **NOT-04 No data.** No GK number, status, link or extracted value is sent. Logs never contain an `oid` together with a GK number or a link.
 - **NOT-05 Callers.** N-1 and N-2 have exactly the two callers above. No route triggers a notification.
@@ -981,7 +1037,7 @@ The frontend repository provides the dev-only simulator (`klesia_webapp/tools/de
 
 ## 9. Implementation structure
 
-The database migrator location is required. The backend follows the Clean Architecture solution already in the repository (`Klesia.sln`); dependencies point inward only (`WebApi → Infrastructure → Application → Domain`).
+The SQL database project location is required. The backend follows the Clean Architecture solution already in the repository (`Klesia.sln`); dependencies point inward only (`WebApi → Infrastructure → Application → Domain`).
 
 ```text
 src/
@@ -994,7 +1050,7 @@ src/
                      Extraction/ (DemandExtractionService, ExtractionSweepService, ExtractionResult,
                                   ExtractionResultValidator)
                      Common/Exceptions/ (ForbiddenException, NotFoundException)
-  Infrastructure/    Persistence/ (IDbConnectionFactory, repositories written with Dapper)
+  Infrastructure/    Persistence/ (ISqlConnectionFactory, repositories written with Dapper)
                      Documents/ (SharePointBaeDocumentStore over Microsoft Graph, HttpsBaeLinkResolver)
                      Extraction/ (AzureDocumentIntelligenceExtractor, ChannelExtractionQueue,
                                   ExtractionWorker, ExtractionSweepWorker)
@@ -1007,10 +1063,10 @@ tests/
   UnitTests/         domain and application behavior (NSubstitute): service, validator, worker logic
   IntegrationTests/  real HTTP pipeline with signed test tokens, in-memory repositories and test doubles
                      for SharePoint, Document Intelligence and SignalR;
-                     opt-in database constraint tests (Database/)
+                     opt-in SQL constraint tests (Database/)
 
 database/
-  Klesia.Database/   authoritative database migrator (scripts own the schema)
+  Klesia.Database/   authoritative SQL project
 ```
 
 `IDemandExtractionRepository` (Dapper) owns the extraction persistence: read a demand for extraction (status, link, owner `oid`, existence of information), save an extraction and set `ok` in one transaction (EXT-06), set `fail` (EXT-07) and list the stale `pending` demands (EXT-09). Each write returns whether it changed anything, so that a lost race is not an error. The validator and the SIREN/SIRET checks are `Application` code, not `Infrastructure` and not SQL.
@@ -1028,18 +1084,18 @@ Keep token validation separate from business query logic. Avoid introducing unre
 | AT-03 | Token for Microsoft Graph or ID token instead of backend API access token | GET | `401` |
 | AT-04 | Valid user access token missing required API scope | GET | `403` |
 | AT-05 | Valid scoped token from unsupported Entra tenant | GET | Rejected (`401`) |
-| AT-06 | Valid scoped token, `oid` not in `sec_User` | GET | `403` |
-| AT-07 | Valid scoped token, matching `sec_User.IsActive = 0` | GET | `403` |
+| AT-06 | Valid scoped token, `oid` not in `sec.User` | GET | `403` |
+| AT-07 | Valid scoped token, matching `sec.User.IsActive = 0` | GET | `403` |
 | AT-08 | Valid scoped token, active row, no demands | GET | `200`, correct `user_id` / `user_name`, `demands: []` |
 | AT-09 | Valid scoped token, active row, multiple demands | GET | `200`; correct snake_case JSON, integer `demand_id`, GK number, HTTPS PDF link, allowed status code |
 | AT-10 | Two authorized users with separate demands | Each GET | Each user receives only their own records; no cross-user leakage |
 | AT-11 | Attacker sends `user_id` query/header matching another user | GET | Ignored for filtering; identity always from validated token |
-| AT-12 | The MySQL database is unavailable | GET | `5xx`, sanitized response, logged server fault |
+| AT-12 | SQL database is unavailable | GET | `5xx`, sanitized response, logged server fault |
 | AT-13 | Browser preflight from approved Vite/SWA origin | OPTIONS | Allowed CORS origin, methods and requested headers |
 | AT-14 | Browser preflight from unapproved origin | OPTIONS | No permissive CORS authorization |
 | AT-15 | Invalid SQL foreign key or invalid status/GK number/link value | INSERT in test DB | Constraint rejection |
 | AT-16 | Same GK number on distinct demands | INSERT | Allowed; no uniqueness on `Demand.GKNumber` |
-| AT-17 | Migrator run again against a database with existing records | `dotnet run --project database/Klesia.Database` | No migration re-applied, no records deleted, idempotent seeds |
+| AT-17 | SQL project republished with existing records | `SqlPackage /Action:Publish` | No unintended records deleted; idempotent seeds |
 | AT-18 | Unauthorized user requests the negotiation route | POST | Same `401`/`403` policy |
 | AT-19 | Valid scoped token, active user, a stored `BaeLink` that is not an absolute HTTPS URL | GET | `5xx`, sanitized body; the stored value is not disclosed |
 | AT-20 | Valid access token without an `oid` claim | GET | `401` |
@@ -1055,10 +1111,10 @@ Keep token validation separate from business query logic. Avoid introducing unre
 | AT-30 | Same GK number submitted twice | POST `/api/v1/demands` | Both `201`; two distinct demands |
 | AT-31 | Active user, valid token | POST `/api/v1/notifications/negotiate` | `200` `{url, accessToken}`; SignalR `userId` = `oid` |
 | AT-32 | Preflight from an approved origin asking for `Authorization`, `X-Requested-With`, `X-SignalR-User-Agent` | OPTIONS negotiate | Allowed; no `Access-Control-Allow-Credentials`; unapproved origin gets no CORS grant |
-| AT-33 | `docker build` from the repository root | build | Succeeds; the image runs as a non-root user and listens on `8080`; it holds no `appsettings.Local.json`, migrator, tests or secret (HOST-01, HOST-02) |
-| AT-34 | Container started with valid settings but MySQL unreachable | GET `/health` | `503` `{"status":"unavailable"}`; the process stays up and the TCP liveness check still succeeds (HOST-05) |
+| AT-33 | `docker build` from the repository root | build | Succeeds; the image runs as a non-root user and listens on `8080`; it holds no `appsettings.Local.json`, SQL project, tests or secret (HOST-01, HOST-02) |
+| AT-34 | Container started with valid settings but Azure SQL unreachable | GET `/health` | `503` `{"status":"unavailable"}`; the process stays up and the TCP liveness check still succeeds (HOST-05) |
 | AT-35 | Request over plain HTTP carrying `X-Forwarded-Proto: https` and `X-Forwarded-For` (as the ingress sends it) | GET | No redirect loop; the request is treated as HTTPS and the client address is the rightmost forwarded value (HOST-04); integration test on the test host |
-| AT-36 | Deployed revision in the dev environment, user-assigned managed identity | GET `/health`, then `GET /api/v1/demands` with a valid token | `200` and `200`; the database is reached with the Entra token and no password (DEC-06, HOST-06); the pipeline ran the migrator before the revision was activated (HOST-12) |
+| AT-36 | Deployed revision in the dev environment, user-assigned managed identity | GET `/health`, then `GET /api/v1/demands` with a valid token | `200` and `200`; the database is reached with the Entra token and no password (DEC-06, HOST-06); the pipeline published the SQL project with `SqlPackage` before the revision was activated (HOST-12) |
 | AT-37 | Notifier called for an owner `oid` (SignalR REST client replaced by a test double) | `INotifier`, N-1 | One message: hub `demands`, method `demandUpdated`, no arguments, addressed to that `oid` only; no broadcast (NOT-01, NOT-02) |
 | AT-38 | SignalR REST client times out or answers `5xx` | `INotifier`, N-1 | The call returns to its caller without throwing, the failure is logged without user data, and the caller is not blocked beyond the short timeout (NOT-03) |
 | AT-39 | Active user, valid `gk_number` and PDF; the Document Intelligence double blocks | POST `/api/v1/demands` | `201` is returned **without waiting** for the extraction, with `status: pending`; exactly one N-1 is sent, after the commit (§7.2) |
@@ -1071,13 +1127,13 @@ Keep token validation separate from business query logic. Avoid introducing unre
 | AT-46 | Pending demands: one fresh, one older than `Extraction:StaleAfterMinutes`, one already `ok`; a replica starts | Recovery sweep | Only the stale `pending` demand is queued and then processed (EXT-09) |
 | AT-47 | Host shutdown while an extraction is in progress | Extraction worker | The demand stays `pending` (no `fail`), and a later sweep processes it (EXT-08) |
 | AT-48 | SharePoint unavailable, then a failing insert after a successful copy | POST `/api/v1/demands` | `503` with nothing stored; then `5xx` and a best-effort removal of the SharePoint copy (§7.2 rules 3 and 4) |
-| AT-49 | Disposable migrated MySQL 8.4 database | Constraint tests | A second `DemandInformation` for the same demand, an orphan `DemandId` or `DemandInformationId`, a SIREN of eight digits, a SIRET not starting with the SIREN, an `idcc` of 10000 and a blank formula name all fail (check error 3819 or key error); several formulas for one information succeed |
+| AT-49 | Disposable published Azure SQL database | Constraint tests | A second `DemandInformation` for the same demand, an orphan `DemandId` or `DemandInformationId`, a SIREN of eight digits, a SIRET not starting with the SIREN, an `idcc` of 10000 and a blank formula name all fail (constraint violation, error 547, or unique key error 2627); several formulas for one information succeed |
 | AT-50 | Any client-supplied `user_id` part in the creation request | POST `/api/v1/demands` | `400` (unknown part); the owner is never taken from the client (DEC-20) |
 
 **Definition of Done**
 
-- [ ] The migrator compiles and its scripts create the six-table schema on Azure Database for MySQL 8.4 (migrations `0001` to `0007`).
-- [ ] Migrator execution and repeat execution are verified in a safe dev/test Azure Database for MySQL environment.
+- [ ] Six-table SQL project compiles to the specified `.dacpac`.
+- [ ] Azure SQL publish procedure and repeat publish are verified in a safe dev/test environment.
 - [ ] All declared relationships, checks, named constraints and FK indexes are in place.
 - [ ] Reference-data scripts are idempotent and respect inactive accounts.
 - [ ] Entra authentication rejects missing, malformed, expired, wrong-tenant, wrong-audience, and wrong-type tokens.
@@ -1091,32 +1147,30 @@ Keep token validation separate from business query logic. Avoid introducing unre
 - [ ] Safe errors, structured logs and no-credential-in-source checks are verified; no extracted value appears in a log.
 - [ ] Automated coverage exists for the acceptance matrix; instructions to run/build/test/deploy are committed to the repository.
 - [ ] Data access uses Dapper only: no Entity Framework Core package, `DbContext` or migration exists in the solution.
-- [ ] The solution targets `net10.0`; AT-15, AT-16, AT-17 and AT-49 are runnable against a disposable MySQL 8.4 database (`KLESIA_TEST_DB_CONNECTION`).
+- [ ] The solution targets `net10.0`; AT-15, AT-16, AT-17 and AT-49 are runnable against a disposable Azure SQL database (`KLESIA_TEST_SQL_CONNECTION`).
 - [ ] The API image builds from the root `Dockerfile`, runs non-root on port 8080, honours `X-Forwarded-*`, and AT-33, AT-34 and AT-35 pass (DEC-15).
-- [ ] Deployment to Azure Container Apps is documented (`docs/deployment-container-apps.md`), the GitHub Actions pipeline (migrator step, SHA-tagged image, health smoke test) is committed and AT-36 is run; the DSI items of OPEN-08 are answered or reported as unverified.
+- [ ] Deployment to Azure Container Apps is documented (`docs/deployment-container-apps.md`), the GitHub Actions pipeline (`SqlPackage` publish step, SHA-tagged image, health smoke test) is committed and AT-36 is run; the DSI items of OPEN-08 are answered or reported as unverified.
 
 ## 11. Implementation instructions for coding agents
 
-1. **Inspect before changing:** inspect the existing repository tree, the database migrator (`Migrations/`, `Seeds/`), current frontend integration contracts and infrastructure conventions. Do not overwrite initialized files unnecessarily.
+1. **Inspect before changing:** inspect the existing repository tree, the SQL project, `01_RefData.sql`, `02_User.sql`, `.publish.xml`, current frontend integration contracts and infrastructure conventions. Do not overwrite initialized files unnecessarily.
 2. **Implement the whole application as described:** the database, `GET /api/v1/demands` and `POST /api/v1/demands` (Entra access-token authentication and SQL allowlist authorization), the background extraction (§7.3), `POST /api/v1/notifications/negotiate`, the notifier (§8) and `GET /health`. Keep `contracts/openapi.yaml` identical to this document.
 3. **Avoid speculative features:** do not add any route beyond `GET /api/v1/demands`, `POST /api/v1/demands`, `POST /api/v1/notifications/negotiate` and `/health`; no status mutation or retry API, no route reading extracted data, no user-admin CRUD, role hierarchies, additional tables or SignalR stubs that return fake production data.
-4. **Follow contracts verbatim:** preserve table names (with their `sec_`/`ref_` prefixes), the constraint-naming scheme of DB-06, JSON field names, HTTP statuses, status codes (`pending`, `ok`, `fail`) and identity mapping. JSON is snake_case and every database identifier is PascalCase (DEC-09, DEC-21).
-5. **Dapper only (DEC-02):** do not add Entity Framework Core packages, a `DbContext`, entity configurations or migrations. Write parameterized **MySQL-dialect** SQL (not T-SQL) in `Infrastructure` repositories; schema changes go through a new, higher-numbered migration script (DB-14), never through an edit of an applied one.
+4. **Follow contracts verbatim:** preserve table names, schema names, the constraint-naming scheme of DB-06, JSON field names, HTTP statuses, status codes (`pending`, `ok`, `fail`) and identity mapping. JSON is snake_case and every database identifier is PascalCase (DEC-09, DEC-21).
+5. **Dapper only (DEC-02):** do not add Entity Framework Core packages, a `DbContext`, entity configurations or migrations. Write parameterized SQL in `Infrastructure` repositories; schema changes go through the SQL project.
 6. **Keep credentials external:** do not use illustrative server names/passwords as executable defaults, and do not include real Entra access tokens, real document URLs or real extracted data in tests/logs. SharePoint location, Document Intelligence endpoint and model id are configuration (§6.1). Personal configuration goes into the git-ignored `appsettings.Local.json` or environment variables.
 7. **Keep the extraction safe:** the queue carries ids only, the PDF is streamed and never written to disk, every status change is a guarded update, the validator runs before any write, and no extracted value is logged (EXT-01 to EXT-10).
-8. **Validate correctness:** run builds/tests, and run the migrator twice against a disposable/dev MySQL 8.4 database when access is available. If Azure access (SharePoint, Document Intelligence, SignalR, Container Apps) is unavailable, report the unverified step explicitly rather than claiming completion.
+8. **Validate correctness:** run builds/tests, and publish the SQL project twice against a disposable/dev Azure SQL database when access is available. If Azure access (SharePoint, Document Intelligence, SignalR, Container Apps) is unavailable, report the unverified step explicitly rather than claiming completion.
 9. **Report changes:** at the end, provide changed-file list, build/test results, configuration values required from the client, unresolved decisions and any deviations from this specification.
-10. **Container-ready (DEC-15):** write nothing to the container file system, add no Kestrel HTTPS or certificate, put no secret or tenant value in the image, keep `UseForwardedHeaders` first in the pipeline (HOST-04), log to the console only, add no route for probes and never run the migrator from the API.
+10. **Container-ready (DEC-15):** write nothing to the container file system, add no Kestrel HTTPS or certificate, put no secret or tenant value in the image, keep `UseForwardedHeaders` first in the pipeline (HOST-04), log to the console only, add no route for probes and never publish the SQL project from the API.
 
 ## 12. External technical references
 
 These are implementation references, not new business requirements:
 
-- Azure Database for MySQL – Flexible Server, supported versions: https://learn.microsoft.com/azure/mysql/flexible-server/concepts-supported-versions
-- Microsoft Entra authentication for Azure Database for MySQL: https://learn.microsoft.com/azure/mysql/flexible-server/concepts-azure-ad-authentication
-- Set up Entra authentication (users, access tokens, clear-text plugin): https://learn.microsoft.com/en-us/azure/mysql/security/security-how-to-entra
-- MySqlConnector `UsePeriodicPasswordProvider`: https://mysqlconnector.net/api/MySqlConnector/MySqlDataSourceBuilder/UsePeriodicPasswordProvider/
-- DbUp for MySQL: https://github.com/DbUp/dbup-mysql
+- SQL database projects and `Microsoft.Build.Sql`: https://learn.microsoft.com/en-us/sql/tools/sql-database-projects/sql-database-projects
+- SQL-project Azure SQL target platform (`DSP`): https://learn.microsoft.com/en-us/sql/tools/sql-database-projects/concepts/target-platform
+- SQL pre/post-deployment script handling: https://learn.microsoft.com/en-us/sql/tools/sql-database-projects/concepts/pre-post-deployment-scripts
 - Entra access token validation: https://learn.microsoft.com/en-us/entra/identity-platform/access-tokens
 - Entra claim validation / tenant-scoped identity: https://learn.microsoft.com/en-us/entra/identity-platform/claims-validation
 - API scope authorization (`Microsoft.Identity.Web`): https://learn.microsoft.com/en-us/entra/msidweb/authentication/authorization

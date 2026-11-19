@@ -1,58 +1,41 @@
-# Local development against Azure Database for MySQL
+# Local development against Azure SQL Database
 
-This guide lets you run the KLESIA API on your PC while it talks to an **Azure Database for MySQL – Flexible Server** (MySQL 8.4). No password is stored anywhere: the API and the database migrator sign in with your own Microsoft Entra account and use the resulting **access token as the MySQL password** (token lifetime 5 to 60 minutes, refreshed automatically by the API).
-
-> The exact server settings (name, network access, Entra administrator, managed identity) are still to be confirmed with the customer's DSI, see **OPEN-07** in the specification. Everything below is configuration, never code.
+This guide lets you run the KLESIA API on your PC while it talks to an **Azure SQL Database**. No password is stored anywhere: the connection uses `Authentication=Active Directory Default`, which signs in with your own Microsoft Entra account.
 
 ## 1. Prerequisites
 
 - .NET 10 SDK (`dotnet --version` must report 10.x; `global.json` pins it).
 - Azure CLI signed in (`az login`) **or** Visual Studio signed in with the same Entra account.
-- An Azure Database for MySQL Flexible Server running **MySQL 8.4**, with Microsoft Entra authentication enabled, an Entra administrator, TLS enabled (the default) and a database named `klesia`.
-- The server firewall allows your public IP (Azure portal → server → *Networking* → add your client IP), unless the server uses private access.
-- Optional, to inspect the database: the `mysql` command-line client or MySQL Workbench. With an Entra token they must enable the **clear-text authentication plugin** (`--enable-cleartext-plugin`), and TLS.
+- `SqlPackage` CLI (for publishing the database): `dotnet tool install -g microsoft.sqlpackage`.
+- An Azure SQL Database whose server firewall allows your public IP (Azure portal → server → *Networking* → add your client IP).
 
-## 2. Give accounts access to the database
+## 2. Give your account access to the database
 
-Connect once as the **Entra administrator** of the server (user name = the administrator's Entra name, password = an access token):
-
-```powershell
-$token = az account get-access-token --resource-type oss-rdbms --output tsv --query accessToken
-mysql -h <server>.mysql.database.azure.com --user <entra admin name> --enable-cleartext-plugin --password=$token
-```
-
-Then create the database users. `CREATE AADUSER` creates the user but grants **no** permission, so grant what each principal needs:
+Run once, connected to the target database as an Entra admin of the server:
 
 ```sql
--- Developer account: the runtime privileges of the API (spec section 6.2), no DDL.
-CREATE AADUSER 'your.name@talan.com';
-GRANT SELECT ON klesia.* TO 'your.name@talan.com'@'%';
-GRANT INSERT ON klesia.`Demand` TO 'your.name@talan.com'@'%';
-GRANT INSERT ON klesia.`DemandInformation` TO 'your.name@talan.com'@'%';
-GRANT INSERT ON klesia.`DemandFormula` TO 'your.name@talan.com'@'%';
-GRANT UPDATE (`StatusId`) ON klesia.`Demand` TO 'your.name@talan.com'@'%';
+CREATE USER [your.name@talan.com] FROM EXTERNAL PROVIDER;
+ALTER ROLE db_datareader ADD MEMBER [your.name@talan.com];
 
--- Deployment principal (person or pipeline running the migrator).
--- DROP and DELETE are deliberately not granted: the migrator only moves forward (DB-11).
-CREATE AADUSER 'klesia-deployer@talan.com';
-GRANT SELECT, INSERT, UPDATE, CREATE, ALTER, INDEX, REFERENCES ON klesia.* TO 'klesia-deployer@talan.com'@'%';
+-- Runtime privileges of the API beyond reading (spec section 6.2), no DDL:
+GRANT INSERT ON dbo.Demand TO [your.name@talan.com];
+GRANT INSERT ON dbo.DemandInformation TO [your.name@talan.com];
+GRANT INSERT ON dbo.DemandFormula TO [your.name@talan.com];
+GRANT UPDATE ON dbo.Demand (StatusId) TO [your.name@talan.com];
 ```
 
-A user name longer than 32 characters needs an alias: `CREATE AADUSER 'long.name@talan.com' AS 'longname';`, and `longname` is then the `User ID`.
+The API reads everything, inserts a demand and its extraction results, and updates only the demand status. (Publishing the schema needs a more privileged principal, see §5.)
 
-The API running in Azure uses the **user-assigned managed identity** (Flexible Server supports no other kind). Its database user is created from the identity's client id:
+The API running in Azure uses the **user-assigned managed identity** of the container app. Create its database user from the identity's name and give it the same privileges:
 
 ```sql
-SET aad_auth_validate_oids_in_tenant = OFF;
-CREATE AADUSER 'klesia-api' IDENTIFIED BY '<client id of the user-assigned managed identity>';
-GRANT SELECT ON klesia.* TO 'klesia-api'@'%';
-GRANT INSERT ON klesia.`Demand` TO 'klesia-api'@'%';
-GRANT INSERT ON klesia.`DemandInformation` TO 'klesia-api'@'%';
-GRANT INSERT ON klesia.`DemandFormula` TO 'klesia-api'@'%';
-GRANT UPDATE (`StatusId`) ON klesia.`Demand` TO 'klesia-api'@'%';
+CREATE USER [<managed identity name>] FROM EXTERNAL PROVIDER;
+ALTER ROLE db_datareader ADD MEMBER [<managed identity name>];
+GRANT INSERT ON dbo.Demand TO [<managed identity name>];
+GRANT INSERT ON dbo.DemandInformation TO [<managed identity name>];
+GRANT INSERT ON dbo.DemandFormula TO [<managed identity name>];
+GRANT UPDATE ON dbo.Demand (StatusId) TO [<managed identity name>];
 ```
-
-> The managed-identity statements and the `GRANT ... @'%'` form follow the general Azure Database for MySQL documentation and have **not** been run against your server. Check them against the current Microsoft documentation (links in the specification, §12) before relying on them.
 
 ## 3. Configure the API
 
@@ -61,7 +44,7 @@ Open `src/WebApi/appsettings.Development.json`: it holds placeholders. **Do not 
 ```json
 {
   "ConnectionStrings": {
-    "KlesiaDb": "Server=<server>.mysql.database.azure.com;Port=3306;Database=klesia;User ID=your.name@talan.com;SslMode=Required;ConnectionTimeout=30"
+    "KlesiaDb": "Server=tcp:<server>.database.windows.net,1433;Database=<database>;Authentication=Active Directory Default;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;ConnectRetryCount=3;ConnectRetryInterval=10"
   },
   "AzureAd": {
     "TenantId": "<tenant guid>",
@@ -78,7 +61,6 @@ Equivalent environment variables: `ConnectionStrings__KlesiaDb`, `AzureAd__Tenan
 
 | Setting | Meaning |
 |---|---|
-| `ConnectionStrings:KlesiaDb` | MySQL connection **without a `Password`**: when none is present the API acquires an Entra access token (scope `https://ossrdbms-aad.database.windows.net/.default`) and uses it as the password. `User ID` is your Entra database user. |
 | `AzureAd:TenantId` | The single Entra tenant allowed to call the API. |
 | `AzureAd:ClientId` | Application (client) ID of the **API** app registration (the token audience). |
 | `AzureAd:RequiredScope` | Name of the delegated permission exposed by the API (e.g. `access_as_user`), not the full `api://…` URI. |
@@ -101,24 +83,19 @@ dotnet run --project src/WebApi --launch-profile https
 
 Once the `Dockerfile` exists (SC-OPS-02), `docker build -t klesia-api .` and `docker run -p 8080:8080` with the environment variables above start the same API on `http://localhost:8080`. `GET /health` answers, but database calls fail with `503`: `DefaultAzureCredential` cannot use your `az login` session from inside a container. Keep using `dotnet run` for day-to-day work; the image is verified in CI and in the dev environment.
 
-## 5. Build and apply the database migrations
-
-MySQL has no DACPAC/`SqlPackage`. The schema is created by the **migrator** in `database/Klesia.Database` (DbUp): `Migrations/*.sql` run once and are recorded in the `SchemaVersions` table, `Seeds/*.sql` run on every execution.
+## 5. Build and publish the database
 
 ```powershell
-dotnet build database/Klesia.Database/Klesia.Database.csproj -c Debug
+dotnet build database/Klesia.Database/Klesia.Database.sqlproj -c Debug
 
-$env:KLESIA_DB_DEPLOY_CONNECTION = "Server=<server>.mysql.database.azure.com;Port=3306;Database=klesia;User ID=klesia-deployer@talan.com;SslMode=Required"
-dotnet run --project database/Klesia.Database -c Debug
+$env:KLESIA_SQL_DEPLOY_CONNECTION = "Server=tcp:<server>.database.windows.net,1433;Database=<database>;Authentication=Active Directory Default;Encrypt=True"
+SqlPackage /Action:Publish `
+  /SourceFile:"database/Klesia.Database/bin/Debug/Klesia.Database.dacpac" `
+  /Profile:"database/Klesia.Database/Properties/Azure.publish.xml" `
+  /TargetConnectionString:$env:KLESIA_SQL_DEPLOY_CONNECTION
 ```
 
-Rules to remember:
-
-- **Never edit a migration that has been applied anywhere.** Add a new, higher-numbered script (`0005_...sql`). Scripts are embedded automatically (`Migrations\*.sql`).
-- **One DDL object per script.** MySQL DDL is not transactional: a failed script cannot be rolled back, so a script must not hold several statements that depend on each other.
-- No semicolon inside a comment or a string literal (the script splitter cuts on it).
-- The seeds are idempotent and insert-only for users. To authorize another identity, append a `UNION ALL SELECT` line with its lower-case Entra `oid` in `Seeds/02_User.sql`.
-- There is no automatic data-loss protection: review every destructive change (drop, narrowing, rename) in code review.
+The deploying account needs rights to create objects. The publish profile blocks data loss and never drops objects missing from the source. The post-deployment scripts are idempotent: they add the reference data and the seeded `admin` user (edit `Scripts/02_User.sql` to add more authorized identities, using their Entra `oid`).
 
 ## 6. Tests
 
@@ -126,31 +103,21 @@ Rules to remember:
 dotnet test Klesia.sln
 ```
 
-The database constraint tests are skipped unless you point them at a **disposable**, already migrated MySQL 8.4 database:
+The SQL constraint tests are skipped unless you point them at a **disposable** published database:
 
 ```powershell
-$env:KLESIA_TEST_DB_CONNECTION = "Server=<server>.mysql.database.azure.com;Port=3306;Database=<test-database>;User ID=<test user>;SslMode=Required"
-dotnet test tests/IntegrationTests --filter "FullyQualifiedName~DatabaseConstraintTests"
+$env:KLESIA_TEST_SQL_CONNECTION = "Server=tcp:<server>.database.windows.net,1433;Database=<test-database>;Authentication=Active Directory Default;Encrypt=True"
+dotnet test tests/IntegrationTests --filter "FullyQualifiedName~SqlConstraintTests"
 ```
 
 Each test runs in a transaction that is rolled back.
 
-## 7. Troubleshooting
-
-| Symptom | Likely cause |
-|---|---|
-| `Access denied for user ... (using password: YES)` | Entra user not created (`CREATE AADUSER`), wrong `User ID`, expired token, or the principal lacks `GRANT`s. |
-| TLS / SSL error | The server requires TLS: keep `SslMode=Required` (or `VerifyFull` once the CA chain is confirmed). |
-| Clear-text / authentication plugin error | The driver must send the token unhashed over TLS: keep `SslMode` at `Required` or stricter. |
-| `Check constraint '...' is violated` (error 3819) | The row breaks a `CK_*` rule (GK number, HTTPS link, status code, GUID format, 0/1 flag). |
-| `Can't connect` / timeout | Your IP is not in the server firewall, or the server is private. |
-
-## 8. Claude Code hooks (`.claude/settings.json`)
+## 7. Claude Code hooks (`.claude/settings.json`)
 
 | Hook | When | What it does |
 |---|---|---|
 | `secret-guard.ps1` | Before a file is written or edited | Blocks passwords, keys, SAS signatures, JWTs and client secrets in tracked files (`appsettings.Local.json` is exempt). |
 | `format-cs.ps1` | After a `.cs` file is written or edited | Applies the `.editorconfig` whitespace rules to that file. Never blocks. |
-| `verify-build.ps1` | When Claude finishes | If code or database files changed: `dotnet build`, `dotnet test`, and the database migrator build. A failure sends Claude back to fix it. |
+| `verify-build.ps1` | When Claude finishes | If code or database files changed: `dotnet build`, `dotnet test`, and the SQL project build. A failure sends Claude back to fix it. |
 
 The hooks run through Windows PowerShell (`powershell`). Review them once with the `/hooks` command in Claude Code.

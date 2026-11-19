@@ -8,7 +8,7 @@ Use this repository as a starter kit for building maintainable enterprise .NET s
 
 - ASP.NET Core Web API
 - Clean Architecture
-- Dapper over MySqlConnector for data access (no Entity Framework) against Azure Database for MySQL, and a DbUp migrator project (`database/Klesia.Database`) for the schema
+- Dapper for data access (no Entity Framework) and a SQL database project for the schema
 - Strong typing and nullable reference types
 - Structured logging and health checks
 - Azure-ready integration boundaries and a container image for Azure Container Apps
@@ -40,14 +40,11 @@ Use this repository as a starter kit for building maintainable enterprise .NET s
 - Use `ProblemDetails` or `ValidationProblemDetails` for failures.
 - Include health checks, OpenAPI, and structured logging.
 
-## Data Access Rules (Dapper, MySQL, no EF)
+## Data Access Rules (Dapper, no EF)
 
-- The database is Azure Database for MySQL (Flexible Server, MySQL 8.4), not SQL Server: write MySQL-dialect SQL, never T-SQL.
-- Do not add Entity Framework Core, a DbContext, EF migrations or Microsoft.Data.SqlClient. Use MySqlConnector.
-- Tables are `sec_Role`, `sec_User`, `ref_Status`, `Demand`, `DemandInformation`, `DemandFormula` in one database (MySQL has no schemas); see `docs/specs/SPECIFICATIONS.md` section 3.
-- Schema changes go in a NEW numbered script under `database/Klesia.Database/Migrations/` (never edit an applied one, one DDL object per script). Seeds in `Seeds/` must stay idempotent.
+- Do not add Entity Framework Core, a DbContext or EF migrations.
+- Schema changes go in the SQL database project `database/Klesia.Database`.
 - Write parameterized SQL in Infrastructure repositories.
-- Database access is passwordless: the Microsoft Entra access token is the MySQL password (no `Password` in the connection string).
 - Repository interfaces live in Application, implementations in Infrastructure.
 - The demand list is returned in full, without pagination (see `docs/specs/SPECIFICATIONS.md`).
 
@@ -66,8 +63,8 @@ Use this repository as a starter kit for building maintainable enterprise .NET s
 - TLS ends at the ingress: `UseForwardedHeaders` (`XForwardedFor`, `XForwardedProto`) first in the pipeline; the ingress CORS policy stays off and the API owns CORS.
 - Probes: startup and readiness on `GET /health`, liveness is TCP. Add no route for probes.
 - Stateless replicas, console logging only, configuration through `Section__Key` environment variables, user-assigned managed identity selected with `AZURE_CLIENT_ID`.
-- The DbUp migrator is not in the API image and never runs at startup: the GitHub Actions pipeline runs it before the new revision, so migrations stay backward compatible with the previous revision.
-- OPEN-08 items (environment, network to MySQL, ingress, registry, replicas, body-size limit) are not decided: never hard-code them and report dependent work as unverified.
+- The SQL database project is not in the API image and is never published at startup: the GitHub Actions pipeline publishes it with `SqlPackage` before the new revision, so schema changes stay backward compatible with the previous revision.
+- OPEN-08 items (environment, network to Azure SQL Database, ingress, registry, replicas, body-size limit) are not decided: never hard-code them and report dependent work as unverified.
 - Guidance: `.claude/skills/azure-container-apps/SKILL.md`.
 
 ## Testing Rules
@@ -75,7 +72,7 @@ Use this repository as a starter kit for building maintainable enterprise .NET s
 - Use xUnit, FluentAssertions, and NSubstitute consistently.
 - Add tests for both happy paths and failure paths.
 - Keep unit tests focused on business behavior.
-- Use integration tests for HTTP endpoints; database constraint tests run against a real, disposable MySQL 8.4 database when `KLESIA_TEST_DB_CONNECTION` is set.
+- Use integration tests for HTTP endpoints; SQL constraint tests run against a real database when `KLESIA_TEST_SQL_CONNECTION` is set.
 
 ## Verification Before Finish
 

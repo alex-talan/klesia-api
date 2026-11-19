@@ -1,11 +1,11 @@
 ---
 name: azure-container-apps
-description: Azure Container Apps hosting rules for Klesia (spec DEC-15, replacing App Service) - multi-stage non-root Dockerfile on port 8080, TLS at the ingress with forwarded headers, startup/readiness/liveness probes, user-assigned managed identity, environment-variable configuration, stateless replicas, GitHub Actions pipeline with the DbUp migrator as a step. Use when writing or reviewing a Dockerfile, deployment pipeline, Bicep, hosting-related startup code, or when anything says App Service.
+description: Azure Container Apps hosting rules for Klesia (spec DEC-15, replacing App Service) - multi-stage non-root Dockerfile on port 8080, TLS at the ingress with forwarded headers, startup/readiness/liveness probes, user-assigned managed identity, environment-variable configuration, stateless replicas, GitHub Actions pipeline with the SqlPackage publish as a step. Use when writing or reviewing a Dockerfile, deployment pipeline, Bicep, hosting-related startup code, or when anything says App Service.
 ---
 
 # Azure Container Apps Hosting (Klesia)
 
-The Klesia API is deployed to **Azure Container Apps** (specification **DEC-15**), not to Azure App Service. `docs/specs/SPECIFICATIONS.md` section 6.3 (HOST-01 to HOST-12) is normative and `docs/deployment-container-apps.md` explains it; both always win over this skill. Application architecture, HTTP contract, authorization and the MySQL database are unchanged.
+The Klesia API is deployed to **Azure Container Apps** (specification **DEC-15**), not to Azure App Service. `docs/specs/SPECIFICATIONS.md` section 6.3 (HOST-01 to HOST-12) is normative and `docs/deployment-container-apps.md` explains it; both always win over this skill. Application architecture, HTTP contract, authorization and the Azure SQL database are unchanged.
 
 ## When to Use This Skill
 
@@ -15,13 +15,13 @@ The Klesia API is deployed to **Azure Container Apps** (specification **DEC-15**
 - Reviewing a change for "does this still work with several replicas behind an ingress?"
 - Replacing any leftover App Service wording (application settings, App Service identity, App Service health check)
 
-Related skills: `azure-integration` (managed identity, typed options), `mysql-database` (Entra token, migrator), `security-audit`, `logging-patterns`.
+Related skills: `azure-integration` (managed identity, typed options), `azure-integration` (Entra, SQL authentication), `security-audit`, `logging-patterns`.
 
 ## Fixed Decisions
 
 | Topic | Rule |
 |-------|------|
-| Image | Multi-stage `Dockerfile` at the repository root: SDK image publishes `src/WebApi`, ASP.NET Core 10 runtime image runs it. SHA-tagged, never `latest`. No migrator, tests, docs, `.claude/`, `appsettings.Local.json` or secret inside (HOST-01) |
+| Image | Multi-stage `Dockerfile` at the repository root: SDK image publishes `src/WebApi`, ASP.NET Core 10 runtime image runs it. SHA-tagged, never `latest`. No SQL project, tests, docs, `.claude/`, `appsettings.Local.json` or secret inside (HOST-01) |
 | Port and user | Plain HTTP on `8080` (`ASPNETCORE_HTTP_PORTS=8080`), non-root user, no certificate and no Kestrel TLS (HOST-02) |
 | TLS and CORS | TLS ends at the ingress. The ingress CORS policy stays disabled: the API's CORS policy is the only one (HOST-03) |
 | Forwarded headers | `UseForwardedHeaders` first in the pipeline, `XForwardedFor` and `XForwardedProto`, known proxies and networks cleared because the ingress is the only entry. Client IP is the rightmost `X-Forwarded-For` value (HOST-04) |
@@ -30,8 +30,8 @@ Related skills: `azure-integration` (managed identity, typed options), `mysql-da
 | Configuration | Environment variables in `Section__Key` form. A secret, if one ever exists, is a Container Apps secret or Key Vault reference (HOST-07) |
 | State | Stateless: no file on the container disk, no correctness-relevant in-memory state, no sticky session, no data-protection key ring (HOST-08) |
 | Logs | Console only, collected in Log Analytics, rules of the logging skill unchanged (HOST-10) |
-| Migrator | Not in the image, never at API startup. The pipeline runs it with the deployment principal before the new revision; migrations stay backward compatible with the previous revision (HOST-12) |
-| Undecided | OPEN-08 items (environment, network path to MySQL, ingress exposure, registry, replicas, body-size limit) are never hard-coded and dependent work is reported as unverified |
+| SQL project | Not in the image, never at API startup. The pipeline publishes it with `SqlPackage` and the deployment principal before the new revision; schema changes stay backward compatible with the previous revision (HOST-12) |
+| Undecided | OPEN-08 items (environment, network path to Azure SQL Database, ingress exposure, registry, replicas, body-size limit) are never hard-coded and dependent work is reported as unverified |
 
 ## Forwarded Headers (composition root)
 
@@ -53,7 +53,7 @@ app.UseForwardedHeaders(); // before HTTPS redirection, authentication, CORS and
 
 ## Dockerfile Rules
 
-- Copy `global.json`, `Directory.Build.props`, `Directory.Packages.props` and `src/` only, then `dotnet publish src/WebApi/WebApi.csproj -c Release`. Do not restore the whole solution (tests and the migrator are not needed).
+- Copy `global.json`, `Directory.Build.props`, `Directory.Packages.props` and `src/` only, then `dotnet publish src/WebApi/WebApi.csproj -c Release`. Do not restore the whole solution (tests and the SQL project are not needed).
 - Final stage: runtime image, `ENV ASPNETCORE_HTTP_PORTS=8080`, `USER $APP_UID`, `EXPOSE 8080`.
 - No `ENV` or `ARG` carrying a tenant id, client id, connection string or token. Settings arrive at runtime.
 - `.dockerignore` excludes `**/bin`, `**/obj`, `.git`, `.claude`, `docs`, `tests`, `database` and `**/appsettings.Local.json`.
@@ -63,7 +63,7 @@ app.UseForwardedHeaders(); // before HTTPS redirection, authentication, CORS and
 
 1. Restore, build, test.
 2. Build the image, tag it with the commit SHA, push it to the registry.
-3. Run the migrator (`database/Klesia.Database`) with `KLESIA_DB_DEPLOY_CONNECTION` and the deployment principal.
+3. Publish the SQL project (`database/Klesia.Database`, DACPAC) with `SqlPackage` using `KLESIA_SQL_DEPLOY_CONNECTION` and the deployment principal.
 4. Deploy a new revision with the SHA-tagged image.
 5. Smoke test `GET /health`, keep the previous revision for rollback.
 
@@ -75,11 +75,11 @@ Azure sign-in uses an OpenID Connect federated credential, never a stored client
 |---------|----------------------|
 | `UseHttps` / a certificate in the container | TLS ends at the ingress; Kestrel serves plain HTTP on 8080 |
 | Forwarded headers registered after authentication or redirection | The scheme and client IP are wrong, redirect loops appear |
-| Liveness probe on `/health` | A MySQL outage restarts every replica and does not fix anything |
+| Liveness probe on `/health` | An Azure SQL outage restarts every replica and does not fix anything |
 | Ingress CORS enabled together with the API's CORS | Two policies that can disagree |
 | Writing uploads or caches to local disk | Replicas do not share a disk; the PDF goes to SharePoint (DEC-13) |
-| Running the migrator at API startup | The runtime identity has no DDL privilege; schema changes belong to the pipeline |
-| A migration that drops or renames a column in the same release | The previous revision still serves during the rollout and after a rollback |
+| Publishing the SQL project at API startup | The runtime identity has no DDL privilege; schema changes belong to the pipeline |
+| A schema change that drops or renames a column in the same release | The previous revision still serves during the rollout and after a rollback |
 | App Service wording or settings (`WEBSITE_*`, application settings, App Service health check) | Replaced by DEC-15 |
 | `latest` tag or a secret baked into the image | Not reproducible, not safe |
 
@@ -99,7 +99,7 @@ Azure sign-in uses an OpenID Connect federated credential, never a stored client
 - [ ] Settings are `Section__Key` environment variables, no secret in the repository or image
 
 ### 4. Delivery
-- [ ] Migrator runs as a pipeline step before the new revision, with the deployment principal
+- [ ] The SqlPackage publish runs as a pipeline step before the new revision, with the deployment principal
 - [ ] Migrations are backward compatible with the previous revision
 - [ ] Anything depending on OPEN-08 is reported as unverified; no deployment is claimed verified without having been run
 

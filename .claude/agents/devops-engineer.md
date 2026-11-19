@@ -15,8 +15,8 @@ When invoked:
 
 DevOps checklist:
 - `dotnet restore`, `dotnet build`, and `dotnet test` are baseline gates
-- Database migrator (DbUp) build and execution against Azure Database for MySQL is automated and documented
-- The API ships as a container image (multi-stage, non-root, port 8080) deployed to Azure Container Apps as a new revision (spec section 6.3, DEC-15); the migrator is a pipeline step before it, never part of the image
+- SQL database project build and deployment is automated and documented
+- The API ships as a container image (multi-stage, non-root, port 8080) deployed to Azure Container Apps as a new revision (spec section 6.3, DEC-15); the SQL project publish (SqlPackage) is a pipeline step before it, never part of the image
 - CI/CD runs on GitHub Actions with an OpenID Connect federated credential, no stored Azure secret
 - Environment-specific configuration is externalized
 - Health checks and readiness are deployment-aware

@@ -27,15 +27,11 @@ This file is the Claude Code-specific instruction entrypoint. Cross-tool equival
 - Use strongly typed configuration bound from `appsettings`, environment variables, and cloud configuration sources.
 - Keep generated code minimal and purposeful.
 
-## 4. Data Access Rules (Dapper, MySQL, no EF)
-- The database is **Azure Database for MySQL (Flexible Server, MySQL 8.4)** (spec DEC-14), not SQL Server. Never write T-SQL: no `TOP`, `[brackets]`, `ISNULL`, `SCOPE_IDENTITY`, `OUTPUT`, `MERGE` or `GO`. Use the `mysql-database` skill for the dialect rules.
-- Persistence uses Dapper with MySqlConnector. Do NOT add Entity Framework Core, a DbContext or EF migrations, and do NOT add Microsoft.Data.SqlClient.
-- MySQL has no schemas inside a database: the tables are `sec_Role`, `sec_User`, `ref_Status`, `Demand`, `DemandInformation` and `DemandFormula` in the single database `klesia`. Quote identifiers with backticks in scripts and spell them exactly as in the spec.
-- The database migrator (`database/Klesia.Database`, DbUp) is the only owner of the schema. Change the schema with a NEW numbered script in `Migrations/`; never edit a script that has been applied. One DDL object per script (MySQL DDL is not transactional).
-- Scripts in `Seeds/` run on every execution: keep them idempotent (`UPDATE` join plus `INSERT ... WHERE NOT EXISTS`); no `INSERT IGNORE`, no `ON DUPLICATE KEY UPDATE`. No semicolon inside SQL comments or literals (the DbUp splitter cuts on it).
-- Write parameterized MySQL SQL inside Infrastructure repositories; never concatenate user input into SQL.
-- Database access is passwordless: no `Password` in the connection string, the Microsoft Entra access token is the password (spec DEC-06).
-- Repository interfaces live in Application; implementations live in Infrastructure. `IDbConnectionFactory` returns a `MySqlConnection`.
+## 4. Data Access Rules (Dapper, no EF)
+- Persistence uses Dapper with Microsoft.Data.SqlClient against Azure SQL Database (spec DEC-14). Do NOT add Entity Framework Core, a DbContext or EF migrations.
+- The SQL database project (`database/Klesia.Database`) is the only owner of the schema; change tables there.
+- Write parameterized SQL inside Infrastructure repositories; never concatenate user input into SQL.
+- Repository interfaces live in Application; implementations live in Infrastructure.
 - The demand list is returned in full, without pagination (see docs/specs/SPECIFICATIONS.md).
 
 ## 5. API Rules
@@ -59,8 +55,8 @@ This file is the Claude Code-specific instruction entrypoint. Cross-tool equival
 - Probes: startup and readiness on `GET /health`, liveness is a TCP probe (a database outage must not restart replicas). Do not add routes for probes; `/health` stays anonymous and detail-free.
 - Stateless replicas: no file written to the container disk, no in-memory state that affects correctness, console logging only (Log Analytics collects it).
 - Identity and configuration: one user-assigned managed identity selected with the environment variable `AZURE_CLIENT_ID`; settings are environment variables in the `Section__Key` form. The API needs no secret.
-- The DbUp migrator is not in the API image and never runs at API startup: the GitHub Actions pipeline runs it before the new revision is deployed, so every migration must stay backward compatible with the previous revision.
-- The DSI settings listed in OPEN-08 (environment, network path to MySQL, ingress exposure, registry, replicas, body-size limit) are not decided yet: never hard-code them, and report anything that depends on them as unverified.
+- The SQL database project is not in the API image and is never published at API startup: the GitHub Actions pipeline publishes it with `SqlPackage` before the new revision is deployed, so every schema change must stay backward compatible with the previous revision.
+- The DSI settings listed in OPEN-08 (environment, network path to Azure SQL Database, ingress exposure, registry, replicas, body-size limit) are not decided yet: never hard-code them, and report anything that depends on them as unverified.
 - Use the `azure-container-apps` skill and the `devops-engineer` and `azure-engineer` agents for this work.
 
 ## 7. Testing Rules
@@ -68,7 +64,7 @@ This file is the Claude Code-specific instruction entrypoint. Cross-tool equival
 - Add tests for positive and negative scenarios.
 - Keep unit tests focused on business behavior.
 - Use integration tests for the HTTP pipeline (signed test tokens, in-memory repositories).
-- Database constraint tests need a real, disposable MySQL 8.4 database already migrated by `database/Klesia.Database`: set `KLESIA_TEST_DB_CONNECTION` to run them.
+- SQL constraint tests need a real Azure SQL / SQL Server database: set `KLESIA_TEST_SQL_CONNECTION` to run them.
 
 ## 8. Verification Before Finish
 - Run build and relevant tests before declaring work complete.

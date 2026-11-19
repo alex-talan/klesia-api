@@ -1,6 +1,6 @@
 # GitHub Copilot Instructions
 
-This repository is the KLESIA backend: ASP.NET Core on .NET 10, Clean Architecture, Dapper and Azure Database for MySQL, deployed as a container on Azure Container Apps. Requirements live in `docs/specs/SPECIFICATIONS.md`.
+This repository is the KLESIA backend: ASP.NET Core on .NET 10, Clean Architecture, Dapper and Azure SQL, deployed as a container on Azure Container Apps. Requirements live in `docs/specs/SPECIFICATIONS.md`.
 
 ## Follow These Rules
 
@@ -22,9 +22,8 @@ This repository is the KLESIA backend: ASP.NET Core on .NET 10, Clean Architectu
 
 ## Data and Persistence
 
-- Use Dapper over MySqlConnector with parameterized MySQL-dialect SQL (never T-SQL); do not add Entity Framework Core, a DbContext, EF migrations or Microsoft.Data.SqlClient.
-- The database migrator `database/Klesia.Database` (DbUp) owns the schema: add a new numbered script in `Migrations/`, never edit an applied one.
-- Tables are `sec_Role`, `sec_User`, `ref_Status`, `Demand`, `DemandInformation`, `DemandFormula` (MySQL has no schemas). Database access is passwordless (Entra token as password).
+- Use Dapper with parameterized SQL; do not add Entity Framework Core, a DbContext or EF migrations.
+- The SQL project `database/Klesia.Database` owns the schema.
 - Repository interfaces live in Application; implementations live in Infrastructure.
 
 ## Hosting (Azure Container Apps, spec DEC-15)
@@ -33,7 +32,7 @@ This repository is the KLESIA backend: ASP.NET Core on .NET 10, Clean Architectu
 - TLS ends at the ingress: register `UseForwardedHeaders` (`XForwardedFor`, `XForwardedProto`) first. The API owns CORS.
 - Probes: `GET /health` for startup and readiness, TCP for liveness; add no probe routes.
 - Stateless, console logging only, `Section__Key` environment variables, user-assigned managed identity (`AZURE_CLIENT_ID`).
-- The DbUp migrator is run by the pipeline, never by the API; migrations stay backward compatible with the previous revision.
+- The SQL project is published by the pipeline (`SqlPackage`), never by the API; schema changes stay backward compatible with the previous revision.
 - Details: `docs/specs/SPECIFICATIONS.md` section 6.3 and `docs/deployment-container-apps.md`.
 
 ## Testing

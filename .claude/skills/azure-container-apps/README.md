@@ -23,7 +23,7 @@ The customer's DSI requires the KLESIA API to run in **Azure Container Apps**, n
 | Identity | User-assigned managed identity + `AZURE_CLIENT_ID` |
 | Config | `Section__Key` environment variables |
 | State | Stateless replicas, console logs only |
-| Migrator | Pipeline step before the new revision, never in the image |
+| SQL project | `SqlPackage` publish step before the new revision, never in the image |
 
 ## Typical Prompt
 
