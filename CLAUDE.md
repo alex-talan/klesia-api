@@ -58,7 +58,7 @@ This file is the Claude Code-specific instruction entrypoint. Cross-tool equival
 - The DSI settings listed in OPEN-08 (plan and tier, network paths, instances, request limits) are not decided yet: never hard-code them, and report anything that depends on them as unverified.
 
 ### Documents: Azure Blob Storage, served only through the API (spec DEC-13, DEC-24)
-- The PDFs live in a **private** Blob Storage container that only the API reads. SharePoint, Microsoft Graph and SAS links are not used: a SAS is a bearer token and cannot be tied to a user.
+- The PDFs live in a **private** Blob Storage container that only the API reads. 
 - `Demand.BaeLink` holds the blob URL without SAS or query string and is **internal**: never return it, never log it.
 - `bae_link` (in `GET` and `POST /api/v1/demands`) is the API path `/api/v1/demands/{demand_id}/bae`, built from `Demand.Id`: stable, relative, no storage URL.
 - `GET /api/v1/demands/{demand_id}/bae` (spec section 5.4) is the only way to read a PDF. Select the demand by its id **and** the caller's `sec.User.Id` in a single query; a missing and a foreign id give the same `404`. Stream the blob (`IBaeDocumentStore.OpenReadAsync`): no whole-file buffer, nothing written to disk. Headers: `application/pdf`, `Cache-Control: private, no-store`, `X-Content-Type-Options: nosniff`.
