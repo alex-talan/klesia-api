@@ -26,7 +26,7 @@ GRANT UPDATE ON dbo.Demand (StatusId) TO [your.name@talan.com];
 
 The API reads everything, inserts a demand and its extraction results, and updates only the demand status. (Publishing the schema needs a more privileged principal, see §5.)
 
-The API running in Azure uses the **user-assigned managed identity** of the container app. Create its database user from the identity's name and give it the same privileges:
+The API running in Azure uses the **user-assigned managed identity** of the App Service. Create its database user from the identity's name and give it the same privileges:
 
 ```sql
 CREATE USER [<managed identity name>] FROM EXTERNAL PROVIDER;
@@ -65,8 +65,25 @@ Equivalent environment variables: `ConnectionStrings__KlesiaDb`, `AzureAd__Tenan
 | `AzureAd:ClientId` | Application (client) ID of the **API** app registration (the token audience). |
 | `AzureAd:RequiredScope` | Name of the delegated permission exposed by the API (e.g. `access_as_user`), not the full `api://…` URI. |
 | `Cors:AllowedOrigins` | Exact frontend origins: `http://localhost:5173` and your deployed Static Web App URL. |
+| `Storage:BlobServiceUri` | Blob endpoint of the storage account holding the PDFs, `https://<account>.blob.core.windows.net`. |
+| `Storage:ContainerName` | Name of the private container for the PDFs. |
 
-On the Azure container app set the environment variable `AZURE_CLIENT_ID` to the client id of the user-assigned managed identity, so `DefaultAzureCredential` picks it (see [`deployment-container-apps.md`](deployment-container-apps.md)).
+On the Azure App Service set the application setting `AZURE_CLIENT_ID` to the client id of the user-assigned managed identity, so `DefaultAzureCredential` picks it (see [`deployment-app-service.md`](deployment-app-service.md)).
+
+### Storage account for the PDFs (DEC-24)
+
+The API stores the PDFs in a **private** Blob container and streams them to their owner itself, so it only needs your Entra account (locally) or the managed identity (in Azure), never an account key or a SAS:
+
+1. Use a development storage account with a private container (no anonymous access) and, if the policy allows it, shared-key access disabled.
+2. Grant your account *Storage Blob Data Contributor* on the container (upload, stream, read back, delete):
+
+```powershell
+az role assignment create --assignee <your Entra object id> --role "Storage Blob Data Contributor" --scope <container resource id>
+```
+
+3. Put `Storage__BlobServiceUri` and `Storage__ContainerName` in `appsettings.Local.json` or the environment. Never put an account key, a connection string or a SAS in a tracked file (`secret-guard.ps1` blocks `sig=` signatures).
+
+> The role name and command are standard Azure ones but were **not** run against your subscription. Role assignments can take several minutes to apply.
 
 In the API app registration set `requestedAccessTokenVersion` to `2` in the manifest, so tokens are issued by `…/v2.0`.
 
@@ -80,8 +97,6 @@ dotnet run --project src/WebApi --launch-profile https
 
 - API: `https://localhost:7180` (HTTP `http://localhost:5180`), health probe `GET /health`, OpenAPI document in Development.
 - Call `GET /api/v1/demands` with `Authorization: Bearer <access token for the API>`.
-
-Once the `Dockerfile` exists (SC-OPS-02), `docker build -t klesia-api .` and `docker run -p 8080:8080` with the environment variables above start the same API on `http://localhost:8080`. `GET /health` answers, but database calls fail with `503`: `DefaultAzureCredential` cannot use your `az login` session from inside a container. Keep using `dotnet run` for day-to-day work; the image is verified in CI and in the dev environment.
 
 ## 5. Build and publish the database
 

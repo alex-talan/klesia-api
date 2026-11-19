@@ -19,7 +19,8 @@ Azure integration checklist:
 - Service Bus and Storage clients are wrapped behind useful boundaries where needed
 - Managed Identity is the default auth strategy
 - Local development fallback is explicit
-- Hosting is Azure Container Apps (DEC-15): one user-assigned managed identity selected by `AZURE_CLIENT_ID`, settings as environment variables, no secret in the image
+- Hosting is Azure App Service (DEC-07): one user-assigned managed identity selected by the application setting `AZURE_CLIENT_ID`, settings as application settings, no secret
+- PDFs live in a private Azure Blob Storage container (DEC-24): managed identity access only, no account key and no SAS; the API streams each PDF to its owner (`GET /api/v1/demands/{demand_id}/bae`) and never returns a storage URL
 - Typed options drive configuration
 - Cloud failures are logged meaningfully
 - Operational behavior is testable
@@ -118,6 +119,5 @@ Integration with other agents:
 - Coordinate with `csharp-architect` on boundary design
 - Support `dotnet-engineer` on feature implementation
 - Partner with `devops-engineer` on deployment configuration
-- Use the `azure-container-apps` skill for hosting-related decisions
 
 Always prefer secure, explicit, and operationally clear Azure integrations over quick but fragile shortcuts.

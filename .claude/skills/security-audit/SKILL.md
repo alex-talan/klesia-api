@@ -115,6 +115,7 @@ return Results.Problem(title: "An unexpected error occurred.");
 - [ ] No secrets are hardcoded
 - [ ] Secret stores are used for production
 - [ ] Logging and telemetry do not leak credentials
+- [ ] Documents are served only through an ownership-checked route (one query on the document id and the caller id), never through storage links or SAS, and a missing or foreign id gives the same `404` (Klesia, DEC-24)
 
 ### 4. Error Handling
 - [ ] Internal details are not returned to clients

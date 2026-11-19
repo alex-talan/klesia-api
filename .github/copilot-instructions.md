@@ -1,6 +1,6 @@
 # GitHub Copilot Instructions
 
-This repository is the KLESIA backend: ASP.NET Core on .NET 10, Clean Architecture, Dapper and Azure SQL, deployed as a container on Azure Container Apps. Requirements live in `docs/specs/SPECIFICATIONS.md`.
+This repository is the KLESIA backend: ASP.NET Core on .NET 10, Clean Architecture, Dapper and Azure SQL, deployed on Azure App Service, with the PDFs in Azure Blob Storage. Requirements live in `docs/specs/SPECIFICATIONS.md`.
 
 ## Follow These Rules
 
@@ -26,14 +26,17 @@ This repository is the KLESIA backend: ASP.NET Core on .NET 10, Clean Architectu
 - The SQL project `database/Klesia.Database` owns the schema.
 - Repository interfaces live in Application; implementations live in Infrastructure.
 
-## Hosting (Azure Container Apps, spec DEC-15)
+## Hosting (Azure App Service, spec DEC-07)
 
-- The API runs in Azure Container Apps, not App Service: multi-stage `Dockerfile`, non-root, plain HTTP on port 8080, no Kestrel HTTPS, no secret in the image.
-- TLS ends at the ingress: register `UseForwardedHeaders` (`XForwardedFor`, `XForwardedProto`) first. The API owns CORS.
-- Probes: `GET /health` for startup and readiness, TCP for liveness; add no probe routes.
-- Stateless, console logging only, `Section__Key` environment variables, user-assigned managed identity (`AZURE_CLIENT_ID`).
-- The SQL project is published by the pipeline (`SqlPackage`), never by the API; schema changes stay backward compatible with the previous revision.
-- Details: `docs/specs/SPECIFICATIONS.md` section 6.3 and `docs/deployment-container-apps.md`.
+- The API runs on Azure App Service (the Container Apps decision is withdrawn): no Dockerfile, Always On enabled, HTTPS Only, Health check on `GET /health` and no other probe route.
+- Application settings in `Section__Key` form, user-assigned managed identity (`AZURE_CLIENT_ID`), stateless instances, clean shutdown of the extraction worker.
+- The SQL project is published by the pipeline (`SqlPackage`), never by the API; schema changes stay backward compatible with the previous version.
+- Details: `docs/specs/SPECIFICATIONS.md` section 6.3 and `docs/deployment-app-service.md`.
+
+## Documents (Azure Blob Storage, spec DEC-24)
+
+- PDFs live in a private Blob container read only by the API. `Demand.BaeLink` (blob URL, no SAS) is internal and never returned.
+- `bae_link` is the API path `/api/v1/demands/{demand_id}/bae`; that route streams the PDF to its owner (demand selected by id and caller id in one query, `404` otherwise). No SAS, no account key, no blob name or URL from the client.
 
 ## Testing
 

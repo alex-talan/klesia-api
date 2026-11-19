@@ -45,19 +45,25 @@ This file is the Claude Code-specific instruction entrypoint. Cross-tool equival
 - Keep Azure SDK usage inside Infrastructure.
 - Prefer Managed Identity and Entra ID auth patterns.
 - Never hardcode secrets.
-- Production settings are the container app's environment variables; use Key Vault (and App Configuration, if adopted) for any secret or centrally managed setting. The API itself needs no secret.
+- Production settings are the App Service's application settings (`Section__Key`); use Key Vault references (and App Configuration, if adopted) for any secret or centrally managed setting. The API itself needs no secret.
 - Hide Azure-specific details behind interfaces when the application layer depends on them.
 
-### Hosting: Azure Container Apps (spec DEC-15, not App Service)
-- The API is deployed to **Azure Container Apps**. DEC-15 supersedes the App Service hosting of DEC-07. Read spec section 6.3 (HOST-01 to HOST-12) before touching a Dockerfile, a pipeline, Bicep or hosting-related startup code.
-- Image: multi-stage `Dockerfile` at the repository root, non-root user, plain HTTP on port `8080`, no Kestrel HTTPS or certificate, no secret, tenant value or `appsettings.Local.json` in the image (`.dockerignore`), tagged with the commit SHA (never `latest`).
-- TLS ends at the ingress: register `UseForwardedHeaders` (`XForwardedFor`, `XForwardedProto`) first in the pipeline. The ingress CORS policy stays disabled; the API owns CORS (spec section 5.2).
-- Probes: startup and readiness on `GET /health`, liveness is a TCP probe (a database outage must not restart replicas). Do not add routes for probes; `/health` stays anonymous and detail-free.
-- Stateless replicas: no file written to the container disk, no in-memory state that affects correctness, console logging only (Log Analytics collects it).
-- Identity and configuration: one user-assigned managed identity selected with the environment variable `AZURE_CLIENT_ID`; settings are environment variables in the `Section__Key` form. The API needs no secret.
-- The SQL database project is not in the API image and is never published at API startup: the GitHub Actions pipeline publishes it with `SqlPackage` before the new revision is deployed, so every schema change must stay backward compatible with the previous revision.
-- The DSI settings listed in OPEN-08 (environment, network path to Azure SQL Database, ingress exposure, registry, replicas, body-size limit) are not decided yet: never hard-code them, and report anything that depends on them as unverified.
-- Use the `azure-container-apps` skill and the `devops-engineer` and `azure-engineer` agents for this work.
+### Hosting: Azure App Service (spec DEC-07; DEC-15 Container Apps is withdrawn)
+- The API is deployed to **Azure App Service**. Do not add a Dockerfile, container ingress, forwarded-header workarounds or probe rules: they belonged to the withdrawn Container Apps decision. Read spec section 6.3 (HOST-01 to HOST-11) before touching hosting, pipeline or Bicep code.
+- **Always On** must be enabled in production: the extraction runs in the API process after the response (EXT-01) and an unloaded app would stop it.
+- HTTPS Only; the App Service Health check targets `GET /health` (anonymous, detail-free). Add no other route for it.
+- Identity and configuration: one user-assigned managed identity selected by the application setting `AZURE_CLIENT_ID`; settings are application settings in the `Section__Key` form. The API needs no secret.
+- Stateless instances: no PDF or state on the instance's disk; the extraction worker stops cleanly on shutdown (EXT-08).
+- The SQL database project is never published at API startup: the GitHub Actions pipeline publishes it with `SqlPackage` before the deployment, so every schema change must stay backward compatible with the previous version.
+- The DSI settings listed in OPEN-08 (plan and tier, network paths, instances, request limits) are not decided yet: never hard-code them, and report anything that depends on them as unverified.
+
+### Documents: Azure Blob Storage, served only through the API (spec DEC-13, DEC-24)
+- The PDFs live in a **private** Blob Storage container that only the API reads. SharePoint, Microsoft Graph and SAS links are not used: a SAS is a bearer token and cannot be tied to a user.
+- `Demand.BaeLink` holds the blob URL without SAS or query string and is **internal**: never return it, never log it.
+- `bae_link` (in `GET` and `POST /api/v1/demands`) is the API path `/api/v1/demands/{demand_id}/bae`, built from `Demand.Id`: stable, relative, no storage URL.
+- `GET /api/v1/demands/{demand_id}/bae` (spec section 5.4) is the only way to read a PDF. Select the demand by its id **and** the caller's `sec.User.Id` in a single query; a missing and a foreign id give the same `404`. Stream the blob (`IBaeDocumentStore.OpenReadAsync`): no whole-file buffer, nothing written to disk. Headers: `application/pdf`, `Cache-Control: private, no-store`, `X-Content-Type-Options: nosniff`.
+- Access to the storage uses the managed identity (*Storage Blob Data Contributor*). No account key, connection string or SAS; shared-key access is disabled. Never accept a URL or a blob name from the client; the blob name is `{oid}/{unique id}.pdf`, create-only.
+- `Azure.Storage.Blobs` stays in Infrastructure behind `IBaeDocumentStore`. The frontend must fetch the route with the bearer token and show an object URL (a plain link cannot carry the token).
 
 ## 7. Testing Rules
 - Use xUnit, FluentAssertions, and NSubstitute consistently.
@@ -71,5 +77,5 @@ This file is the Claude Code-specific instruction entrypoint. Cross-tool equival
 - Review warnings, analyzer output, and architectural drift.
 - Confirm project references still point inward only.
 - Leave README and docs/specs/SPECIFICATIONS.md in sync with the code.
-- For container or pipeline changes run `docker build` when Docker is available; otherwise report the image as unverified. Never claim a deployment to Azure Container Apps was verified without having run it.
+- Never claim that a deployment to Azure App Service, a storage permission or the document route was verified without having run it; report it as unverified.
 - The authoritative requirements are in `docs/specs/SPECIFICATIONS.md`; change contracts there first.
