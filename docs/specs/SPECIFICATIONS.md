@@ -52,12 +52,12 @@
 
 | ID | Observation / decision | Handling |
 |---|---|---|
-| OPEN-01 | **Resolved.** The API has **five HTTP routes**: `GET /api/v1/demands` (§5.1), `GET /api/v1/demands/{demand_id}/bae` (§5.4), `POST /api/v1/demands` (§7.2), `POST /api/v1/notifications/negotiate` (§8.1) and the anonymous `GET /health` (§5.3). The `demandUpdated` event is **not** HTTP. | Their contract is stated in this document and mirrored in `contracts/openapi.yaml` (DEC-08). Do not add any other route (status mutation, extraction trigger or retry, read of the extracted data). |
+| OPEN-01 | **Resolved.** The API has **five HTTP routes**: `GET /api/v1/demands` (§5.1), `GET /api/v1/demands/{demand_id}/bae` (§5.4), `POST /api/v1/demands` (§7.2), `POST /api/v1/notifications/negotiate` (§8.1) and the anonymous `GET /health` (§5.3). | Their contract is stated in this document and mirrored in `contracts/openapi.yaml` (DEC-08). Do not add any other route (status mutation, extraction trigger or retry, read of the extracted data). |
 | OPEN-03 | The precise delegated API scope name, Entra tenant ID and API application ID are absent. | Supplied through configuration (§6.1: `AzureAd:*`); never hard-coded. The API refuses to start while they are missing or still placeholders. |
 | OPEN-04 | **Resolved.** The only authorization rule for now is *own data only*: an authenticated, allowlisted, active user receives exclusively the demands whose `Demand.UserId` is their own `sec.User.Id`. | The role codes `admin`, `operational` and `guest` are confirmed as the real codes, but **no role grants or removes any access**. Do not infer cross-user, administrator or role-based behavior. |
 | OPEN-05 | **Resolved, revised by DEC-24.** The PDFs are stored in a private **Azure Blob Storage** container | `Demand.BaeLink` holds the blob URL and is internal. The client receives only the API path `/api/v1/demands/{demand_id}/bae`, which streams the PDF to its owner (§5.4). No link to the storage and no SAS exists. |
 | INT-05 | `maxPdfSizeMb`: 10 MB is illustrative, not confirmed. | The limit is the backend setting `Upload:MaxPdfSizeMb`, provisionally 10 (1 MB = 1,048,576 bytes); it MUST equal the webapp's `public/config/app-config.json` value and be confirmed by the operator before production. |
-| INT-08 | Exact error-body JSON structure. | **Resolved.** Every error response of an application route is RFC 9457 (7807) `application/problem+json` (§5.2). The HTTP status stays the primary signal; the frontend never renders server text. |
+| INT-08 | **Resolved.** Exact error-body JSON structure. | Every error response of an application route is RFC 9457 (7807) `application/problem+json` (§5.2). The HTTP status stays the primary signal; the frontend never renders server text. |
 | DEC-01 | Backend target framework. | **.NET 10 (`net10.0`)** from the start (SDK pinned in `global.json`). |
 | DEC-02 | Data access technology. | **Dapper** over `Microsoft.Data.SqlClient`. **Entity Framework Core, `DbContext` and EF migrations MUST NOT be used.** The SQL database project (`database/Klesia.Database`) is the single owner of the schema. |
 | DEC-03 | Existing repository files take precedence over earlier draft DDL. | Primary keys are named `Id` (DEC-12, DB-03), constraint names follow the single scheme of DB-06, column sizes and defaults follow the files already present in `database/`, and the `ref` schema is kept. The draft DDL in earlier revisions of this document is superseded by §3.4. |
@@ -70,13 +70,12 @@
 | DEC-10 | Success status of `POST /api/v1/demands`. | `201 Created` with the created demand as body (same shape as a `demands[]` item). There is no single-demand route, so no `Location` header is sent. The frontend treats any 2xx as success and ignores the body. |
 | DEC-11 | Delegated scope name. | The delegated scope is named `access_as_user` (fixed in the contract's OAuth2 security scheme and set in `AzureAd:RequiredScope`). The full scope requested by the SPA is `api://<API client id>/access_as_user`. |
 | DEC-12 | Primary-key naming. | Every primary key is named `Id` (`sec.Role.Id`, `sec.User.Id`, `ref.Status.Id`, `Demand.Id`), as in the database project. Foreign keys keep the `{ReferencedTable}Id` form (`RoleId`, `UserId`, `StatusId`). Dapper queries alias keys to the domain names (`d.Id AS DemandId`); the JSON field `demand_id` is `Demand.Id`. This replaces the earlier `{Table}Id` rule. |
-| DEC-13 | Copy of the uploaded PDF into Azure Blob Storage. | **Requirement:** the backend MUST copy the PDF received by `POST /api/v1/demands` into the private Blob Storage container of the configuration (`Storage:*`, §6.1) and MUST store the resulting **blob URL without SAS** in `Demand.BaeLink`; what the API returns to the client is defined by DEC-24. The browser never uploads to the storage; the database stores the link, never the file; the API server keeps no copy (the extraction reads the blob back, EXT-02). All storage access is isolated in `IBaeDocumentStore` (Infrastructure, `Azure.Storage.Blobs`). The blob name is generated by the backend, `{oid}/{unique id}.pdf` where `oid` is the owner's `sec.User.UserUniqueId` and the unique id a new GUID, and never taken from the client, so repeated submissions of the same GK number cannot overwrite each other; the upload never overwrites an existing blob. **ASSUMPTION** (to confirm with the DSI, OPEN-11): access through the App Service's user-assigned managed identity with *Storage Blob Data Contributor* on the one container; account and container come from configuration (`Storage:*`), never from code or from the client. |
+| DEC-13 | Copy of the uploaded PDF into Azure Blob Storage. | **Requirement:** the backend MUST copy the PDF received by `POST /api/v1/demands` into the private Blob Storage container of the configuration (`Storage:*`, §6.1) and MUST store the resulting **blob URL without SAS** in `Demand.BaeLink`; what the API returns to the client is defined by DEC-24. The browser never uploads to the storage; the database stores the link, never the file; the API server keeps no copy (the extraction reads the blob back, EXT-02). All storage access is isolated in `IBaeDocumentStore` (Infrastructure, `Azure.Storage.Blobs`). The blob name is generated by the backend, `{oid}/{unique id}.pdf` where `oid` is the owner's `sec.User.UserUniqueId` and the unique id a new GUID, and never taken from the client, so repeated submissions of the same GK number cannot overwrite each other; the upload never overwrites an existing blob. **Resolved.**: access through the App Service's user-assigned managed identity with *Storage Blob Data Contributor* on the one container; account and container come from configuration (`Storage:*`), never from code or from the client. |
 | OPEN-06 | **Resolved.** How the uploaded BAE PDF reaches the storage. | Stated as an explicit requirement in **DEC-13**: copy into Azure Blob Storage, store the blob URL without SAS in `Demand.BaeLink`. Only deployment settings remain (account, container, role assignments); they are configuration, not an open question about the HTTP contract. |
-| DEC-14 | Database engine: **Azure SQL Database** (SQL Server). | The client's final decision is **Azure SQL Database**. It replaces an intermediate decision to use Azure SQL Database, which is withdrawn. Decided consequences: (1) the three schemas `sec`, `ref` and `dbo` hold the six tables (DB-02); (2) a **SQL database project** (`database/Klesia.Database`, `Microsoft.Build.Sql`) is built into a DACPAC and published with `SqlPackage` (§3.5); (3) **`Microsoft.Data.SqlClient`** is the ADO.NET provider; (4) **passwordless access with Microsoft Entra**: `Authentication=Active Directory Default` (DEC-06); (5) `UserUniqueId` is `UNIQUEIDENTIFIER` and `IsActive`/`IsInternal` are `BIT`; (6) all constraints are named, including primary keys and defaults (`PK_`, `DF_`, `AK_`, `FK_`, `CK_`, `IX_`, DB-06); (7) case-sensitive checks use a binary collation. The HTTP contract, JSON, authorization rules and API behavior are **unchanged**; the SQL of the repositories is T-SQL (`OUTPUT INSERTED.Id`, `UPDATE ... FROM`), an implementation detail of `Infrastructure`. |
-| DEC-15 | **Withdrawn (2026-11-19).** Hosting on Azure Container Apps. | The decision to deploy the API in Azure Container Apps is withdrawn: hosting is **Azure App Service** again (DEC-07, §6.3). Nothing of it remains in this document (no container image, `Dockerfile`, ingress, forwarded-header or probe rule). The ID is kept so that earlier references stay readable. |
+| DEC-14 | Database engine: **Azure SQL Database** (SQL Server). | The client's final decision is **Azure SQL Database**. Decided consequences: (1) the three schemas `sec`, `ref` and `dbo` hold the six tables (DB-02); (2) a **SQL database project** (`database/Klesia.Database`, `Microsoft.Build.Sql`) is built into a DACPAC and published with `SqlPackage` (§3.5); (3) **`Microsoft.Data.SqlClient`** is the ADO.NET provider; (4) **passwordless access with Microsoft Entra**: `Authentication=Active Directory Default` (DEC-06); (5) `UserUniqueId` is `UNIQUEIDENTIFIER` and `IsActive`/`IsInternal` are `BIT`; (6) all constraints are named, including primary keys and defaults (`PK_`, `DF_`, `AK_`, `FK_`, `CK_`, `IX_`, DB-06); (7) case-sensitive checks use a binary collation. The HTTP contract, JSON, authorization rules and API behavior are **unchanged**; the SQL of the repositories is T-SQL (`OUTPUT INSERTED.Id`, `UPDATE ... FROM`), an implementation detail of `Infrastructure`. |
 | DEC-16 | Real-time notifications. | The client decided (2026-11-12) that the backend notifies the owner through Azure SignalR **at two moments**: **N-1** when a new demand has been stored in the database and **N-2** when the extraction of the PDF is finished and the demand status has changed. Both use the same event `demandUpdated` with no payload and go to the owner only (§8.2); the frontend reloads its list with `GET /api/v1/demands` on each. N-2 is sent whether the extraction succeeded or failed (DEC-17, DEC-19). Azure SignalR Service is used in Serverless mode. |
 | OPEN-07 | **Open: to confirm with the customer's DSI.** Azure SQL Database deployment settings. | (b) Server name, database name, service tier, region and network access (public access with firewall rules, or a private endpoint: the App Service must reach the server, see OPEN-08). (c) Entra authentication: an Entra administrator on the logical server, and the database users of the runtime and deployment principals (`CREATE USER [name] FROM EXTERNAL PROVIDER`). (d) Whether Microsoft Entra-only authentication is enabled. (e) TLS: `Encrypt=True` and `TrustServerCertificate=False` (the defaults used in §6.1). Until confirmed none of this is hard-coded: it is configuration (§6.1). |
-| OPEN-08 | **Open: to confirm with the customer's DSI.** Azure App Service deployment settings. | (a) The App Service plan: operating system (Linux or Windows), pricing tier and region; the tier must allow **Always On** and, if wanted, deployment slots and scale-out. (b) The network path to Azure SQL Database (OPEN-07b) and to the storage account (OPEN-12): public access with firewall rules, or VNet integration with private endpoints; outbound addresses are not a stable allowlist when the app scales or moves. (c) Inbound exposure: public endpoint or a private entry point, IP restrictions, custom domain and certificate. (d) Instance count and autoscale rule, and the thresholds and consequences of the Health check (HOST-03); with several instances the background extraction runs in whichever instance accepted the request (HOST-06, OPEN-10). (e) **Always On**: the extraction runs in the API process after the response (EXT-01) and an idle app that the platform unloads would stop it, so Always On MUST be enabled in production (not offered by the lowest tiers). (f) The request-size limits of the host and the platform request timeout against `Upload:MaxPdfSizeMb` (HOST-07). (g) Who owns the infrastructure code (Bicep): the DSI's infrastructure contract or this repository, and the role assignments (*Storage Blob Data Contributor*, *Cognitive Services User*, SignalR). (h) The Log Analytics workspace and the telemetry backend (§6.2). (i) GitHub Actions to Azure authentication: an OpenID Connect federated credential on a deployment principal (no stored secret), environments and approvals. Until confirmed none of this is hard-coded: it is configuration or infrastructure code. |
+| OPEN-08 | **Open: to confirm with the customer's DSI.** Azure App Service deployment settings. | (a) The App Service plan: operating system (Linux if possible), pricing tier and region; the tier must allow **Always On** and, if wanted, deployment slots and scale-out. (b) The network path to Azure SQL Database (OPEN-07b) and to the storage account (OPEN-12): public access with firewall rules, or VNet integration with private endpoints; outbound addresses are not a stable allowlist when the app scales or moves. (c) Inbound exposure: public endpoint or a private entry point, IP restrictions, custom domain and certificate. (d) Instance count and autoscale rule, and the thresholds and consequences of the Health check (HOST-03); with several instances the background extraction runs in whichever instance accepted the request (HOST-06, OPEN-10). (e) **Always On**: the extraction runs in the API process after the response (EXT-01) and an idle app that the platform unloads would stop it, so Always On MUST be enabled in production (not offered by the lowest tiers). (f) The request-size limits of the host and the platform request timeout against `Upload:MaxPdfSizeMb` (HOST-07). (g) Who owns the infrastructure code (Bicep): the DSI's infrastructure contract or this repository, and the role assignments (*Storage Blob Data Contributor*, *Cognitive Services User*, SignalR). (h) The Log Analytics workspace and the telemetry backend (§6.2). (i) GitHub Actions to Azure authentication: an OpenID Connect federated credential on a deployment principal (no stored secret), environments and approvals. Until confirmed none of this is hard-coded: it is configuration or infrastructure code. |
 | INT-09 | Duplicate submissions. | Allowed: each `POST /api/v1/demands` creates a new demand and a new extraction. `Demand.GKNumber` is not unique (AT-16, AT-30) and the frontend never retries a submission automatically. |
 | DEC-17 | Demand creation workflow. | Creating a demand is a three-step workflow `[1. Demand creation] → [2. Extraction] → [3. DONE]` (§7). Step 1 is the HTTP request: it answers `201` with the demand in status `pending`. Steps 2 and 3 run in the background, in the API process, after the response (EXT-01). The owner is told through SignalR at the end of step 1 (N-1) and at the end of step 3, whether it ended well or not (N-2). |
 | DEC-18 | Document extraction engine. | **Azure AI Document Intelligence** with a custom model trained for the BAE form. Its endpoint and model id are configuration (`DocumentIntelligence:Endpoint`, `DocumentIntelligence:ModelId`, §6.1), never code. The service answers with the JSON of EXT-04, which the API validates and stores in `DemandInformation` and `DemandFormula`. **ASSUMPTION:** the API calls the service with the App Service's user-assigned managed identity (role *Cognitive Services User*), no key. |
@@ -97,8 +96,8 @@
 flowchart LR
     U[User] --> FE[Vue frontend / Azure Static Web App]
     FE -->|Microsoft Entra sign-in| ENTRA[Microsoft Entra ID]
-    FE -->|GET and POST /api/v1/demands, GET /api/v1/demands/{id}/bae\nBearer access token| API[Backend API / ASP.NET Core .NET 10 / Azure App Service]
-    API -->|Validate JWT issuer, audience,\nsignature, lifetime, delegated scope| ENTRA
+    FE -->|"GET and POST /api/v1/demands, GET /api/v1/demands/{id}/bae\nBearer access token"| API[Backend API / ASP.NET Core .NET 10 / Azure App Service]
+    API -->|"Validate JWT issuer, audience,<\br>signature, lifetime, delegated scope"| ENTRA
     API -->|Dapper: allowlist lookup by Entra oid,\ndemands, extracted data| DB[(Azure SQL Database)]
     API -->|Managed identity: upload, stream to the owner, read back| ST[Azure Blob Storage]
     API -->|Background: analyze the PDF with the custom model| DI[Azure Document Intelligence]
@@ -160,49 +159,55 @@ erDiagram
     Status ||--o{ Demand : "StatusId"
     Demand ||--o| DemandInformation : "DemandId"
     DemandInformation ||--|{ DemandFormula : "DemandInformationId"
+
     Role {
-      int Id PK
-      nvarchar Name
-      nvarchar Code UK
+        int Id PK
+        nvarchar Name
+        nvarchar Code UK
     }
+
     User {
-      int Id PK
-      uniqueidentifier UserUniqueId UK
-      int RoleId FK
-      nvarchar Name
-      nvarchar Email
-      bit IsInternal
-      bit IsActive
+        int Id PK
+        uniqueidentifier UserUniqueId UK
+        int RoleId FK
+        nvarchar Name
+        nvarchar Email
+        bit IsInternal
+        bit IsActive
     }
+
     Status {
-      int Id PK
-      nvarchar Name
-      nvarchar DisplayName
-      nvarchar Code UK
-      nvarchar Description
+        int Id PK
+        nvarchar Name
+        nvarchar DisplayName
+        nvarchar Code UK
+        nvarchar Description
     }
+
     Demand {
-      int Id PK
-      int UserId FK
-      char GKNumber
-      nvarchar BaeLink
-      int StatusId FK
-      datetime CreatedAt
+        int Id PK
+        int UserId FK
+        char GKNumber
+        nvarchar BaeLink
+        int StatusId FK
+        datetime CreatedAt
     }
+
     DemandInformation {
-      int Id PK
-      int DemandId FK_UK
-      varchar Brand
-      char9 Siren
-      char14 EstablishmentSiret
-      varchar Social
-      varchar OtherExtractedColumns
+        int Id PK
+        int DemandId FK,UK
+        varchar Brand
+        char Siren
+        char EstablishmentSiret
+        varchar Social
+        varchar OtherExtractedColumns
     }
+
     DemandFormula {
-      int Id PK
-      int DemandInformationId FK
-      varchar Name
-      varchar Detail
+        int Id PK
+        int DemandInformationId FK
+        varchar Name
+        varchar Detail
     }
 ```
 
@@ -852,9 +857,9 @@ Creating a demand is a three-step workflow (DEC-17):
 
 | Step | Runs | What happens | Status afterwards | Notification |
 |---|---|---|---|---|
-| 1. Demand creation (§7.2) | In the HTTP request `POST /api/v1/demands` | The PDF is copied into Blob Storage and the demand is stored | `pending` | **N-1** *demand in DB* |
+| 1. Demand creation (§7.2) | In the HTTP request `POST /api/v1/demands` | The PDF is copied into Blob Storage and the demand is stored | `pending` | **N-1** *demand stored* |
 | 2. Extraction (§7.3) | In the background, after the response | The PDF is read back, analyzed by Document Intelligence, the answer is validated and stored | `pending` until the end of the step | none |
-| 3. DONE (§7.4) | End of step 2 | The status takes its final value | `ok` (success) or `fail` (any failure) | **N-2** *extraction finished* |
+| 3. DONE (§7.4) | End of step 2 | The status takes its final value | `ok` (success) or `fail` (any failure) | **N-2** *extraction completed* |
 
 ```mermaid
 sequenceDiagram
@@ -871,6 +876,7 @@ sequenceDiagram
     API-->>SR: N-1 demandUpdated (owner only)
     API->>W: enqueue the demand id
     API-->>FE: 201 Created (status pending)
+    FE->>API: GET /api/v1/demands
     W->>DB: read owner, link and status
     W->>ST: read the PDF back
     W->>DI: analyze with the custom model
@@ -1043,14 +1049,14 @@ Success: `200 OK`:
 | Client method name | `demandUpdated` (case-sensitive) |
 | Payload | **No arguments**; any unexpected payload is ignored by the frontend |
 | Recipient | Owning user only, selected by stable Entra `oid` |
-| Trigger | Two notifications, same event: **N-1 *demand in DB*** and **N-2 *extraction finished***. See the catalogue below |
+| Trigger | Two notifications, same event: **N-1 *demand stored*** and **N-2 *extraction completed***. See the catalogue below |
 | Delivery | At-most-once, best effort; no replay or durable event history |
 | Client recovery | Reload `GET /api/v1/demands` after (re)connection or receiving the event |
 
 | Id | Notification | When | Sent by |
 |---|---|---|---|
-| N-1 | *demand in DB* | After the commit of the `Demand` insert with status `pending` (§7.2 rule 5) | `DemandService` (`POST /api/v1/demands`) |
-| N-2 | *extraction finished* | After the final status, `ok` **or** `fail`, is committed (§7.4) | `DemandExtractionService` (background worker) |
+| N-1 | *demand stored* | After the commit of the `Demand` insert with status `pending` (§7.2 rule 5) | `DemandService` (`POST /api/v1/demands`) |
+| N-2 | *extraction completed* | After the final status, `ok` **or** `fail`, is committed (§7.4) | `DemandExtractionService` (background worker) |
 
 Both send the same event with the same empty payload: the frontend reloads `GET /api/v1/demands` on every event, never reads the payload, and learns the outcome from the `status` of the demand (BE-02, RT-03 of the webapp specification). A distinct event name or a payload would be a contract change.
 
@@ -1067,36 +1073,6 @@ The frontend repository provides the dev-only simulator (`klesia_webapp/tools/de
 ## 9. Implementation structure
 
 The SQL database project location is required. The backend follows the Clean Architecture solution already in the repository (`Klesia.sln`); dependencies point inward only (`WebApi → Infrastructure → Application → Domain`).
-
-```text
-src/
-  Domain/            Users/ApplicationUser, Demands/Demand, Demands/GKNumber, Demands/DemandStatus,
-                     Demands/DemandInformation, Demands/DemandFormula
-  Application/       Abstractions/ (IUserRepository, IDemandRepository, IDemandExtractionRepository,
-                                    IBaeDocumentStore, IDocumentExtractor,
-                                    IExtractionQueue, INotifier)
-                     Demands/ (DemandService: list, creation and document download, DemandDto, UserDemandsDto)
-                     Extraction/ (DemandExtractionService, ExtractionSweepService, ExtractionResult,
-                                  ExtractionResultValidator)
-                     Common/Exceptions/ (ForbiddenException, NotFoundException)
-  Infrastructure/    Persistence/ (ISqlConnectionFactory, repositories written with Dapper)
-                     Documents/ (BlobBaeDocumentStore over Azure.Storage.Blobs)
-                     Extraction/ (AzureDocumentIntelligenceExtractor, ChannelExtractionQueue,
-                                  ExtractionWorker, ExtractionSweepWorker)
-                     Notifications/ (AzureSignalRNotifier)   Options/   DependencyInjection.cs
-  WebApi/            Authentication/ (Entra options, validation, scope policy)
-                     Cors/   Logging/   Contracts/ (snake_case request and response records)
-                     Controllers/DemandsController (GET list, GET document, POST), NotificationsController
-                     Infrastructure/GlobalExceptionHandler   Program.cs
-tests/
-  UnitTests/         domain and application behavior (NSubstitute): service, validator, worker logic
-  IntegrationTests/  real HTTP pipeline with signed test tokens, in-memory repositories and test doubles
-                     for Blob Storage, Document Intelligence and SignalR;
-                     opt-in SQL constraint tests (Database/)
-
-database/
-  Klesia.Database/   authoritative SQL project
-```
 
 `IDemandExtractionRepository` (Dapper) owns the extraction persistence: read a demand for extraction (status, link, owner `oid`, existence of information), save an extraction and set `ok` in one transaction (EXT-06), set `fail` (EXT-07) and list the stale `pending` demands (EXT-09). Each write returns whether it changed anything, so that a lost race is not an error. The validator and the SIREN/SIRET checks are `Application` code, not `Infrastructure` and not SQL.
 
@@ -1118,7 +1094,7 @@ Keep token validation separate from business query logic. Avoid introducing unre
 | AT-06 | Valid scoped token, `oid` not in `sec.User` | GET | `403` |
 | AT-07 | Valid scoped token, matching `sec.User.IsActive = 0` | GET | `403` |
 | AT-08 | Valid scoped token, active row, no demands | GET | `200`, correct `user_id` / `user_name`, `demands: []` |
-| AT-09 | Valid scoped token, active row, multiple demands | GET | `200`; correct snake_case JSON, integer `demand_id`, GK number, HTTPS PDF link, allowed status code |
+| AT-09 | Valid scoped token, active row, multiple demands | GET | `200`; correct snake_case JSON, integer `demand_id`, GK number, `bae_link` equal to the API path of the document (AT-55), allowed status code |
 | AT-10 | Two authorized users with separate demands | Each GET | Each user receives only their own records; no cross-user leakage |
 | AT-11 | Attacker sends `user_id` query/header matching another user | GET | Ignored for filtering; identity always from validated token |
 | AT-12 | SQL database is unavailable | GET | `5xx`, sanitized response, logged server fault |
@@ -1191,36 +1167,4 @@ Keep token validation separate from business query logic. Avoid introducing unre
 - [ ] `GET /api/v1/demands/{demand_id}/bae` serves only the owner's PDF as DEC-24 and §5.4 specify: AT-19 and AT-51 to AT-59 pass, `bae_link` is the API path, and the storage is private and read only by the API.
 - [ ] The API is deployed to Azure App Service (HOST-01 to HOST-11): Always On, HTTPS only, Health check on `/health`, user-assigned identity. The deployment is documented (`docs/deployment-app-service.md`), the GitHub Actions pipeline (`SqlPackage` publish, deployment, health smoke test) is committed and AT-33 is run; the DSI items of OPEN-08 are answered or reported as unverified.
 
-## 11. Implementation instructions for coding agents
 
-1. **Inspect before changing:** inspect the existing repository tree, the SQL project, `01_RefData.sql`, `02_User.sql`, `.publish.xml`, current frontend integration contracts and infrastructure conventions. Do not overwrite initialized files unnecessarily.
-2. **Implement the whole application as described:** the database, `GET /api/v1/demands`, `GET /api/v1/demands/{demand_id}/bae` and `POST /api/v1/demands` (Entra access-token authentication and SQL allowlist authorization), the background extraction (§7.3), `POST /api/v1/notifications/negotiate`, the notifier (§8) and `GET /health`. Keep `contracts/openapi.yaml` identical to this document.
-3. **Avoid speculative features:** do not add any route beyond `GET /api/v1/demands`, `GET /api/v1/demands/{demand_id}/bae`, `POST /api/v1/demands`, `POST /api/v1/notifications/negotiate` and `/health`; no status mutation or retry API, no route reading extracted data, no user-admin CRUD, role hierarchies, additional tables or SignalR stubs that return fake production data.
-4. **Follow contracts verbatim:** preserve table names, schema names, the constraint-naming scheme of DB-06, JSON field names, HTTP statuses, status codes (`pending`, `ok`, `fail`) and identity mapping. JSON is snake_case and every database identifier is PascalCase (DEC-09, DEC-21).
-5. **Dapper only (DEC-02):** do not add Entity Framework Core packages, a `DbContext`, entity configurations or migrations. Write parameterized SQL in `Infrastructure` repositories; schema changes go through the SQL project.
-6. **Keep credentials external:** do not use illustrative server names/passwords as executable defaults, and do not include real Entra access tokens, real document URLs or real extracted data in tests/logs. storage account and container, Document Intelligence endpoint and model id are configuration (§6.1). Personal configuration goes into the git-ignored `appsettings.Local.json` or environment variables.
-7. **Keep the extraction safe:** the queue carries ids only, the PDF is streamed and never written to disk, every status change is a guarded update, the validator runs before any write, and no extracted value is logged (EXT-01 to EXT-10).
-8. **Validate correctness:** run builds/tests, and publish the SQL project twice against a disposable/dev Azure SQL database when access is available. If Azure access (Blob Storage, Document Intelligence, SignalR, App Service) is unavailable, report the unverified step explicitly rather than claiming completion.
-9. **Report changes:** at the end, provide changed-file list, build/test results, configuration values required from the client, unresolved decisions and any deviations from this specification.
-10. **Documents (DEC-24):** store only the blob URL without SAS and never return it; return `bae_link` as the API path `/api/v1/demands/{demand_id}/bae`; serve the PDF only through that route, selecting the demand by its id **and** the caller's id in one query and answering `404` for a missing or foreign id; stream the blob (no whole-file buffer, no disk); use the managed identity, never an account key, a connection string or a SAS; never accept a URL or a blob name from the client.
-
-## 12. External technical references
-
-These are implementation references, not new business requirements:
-
-- SQL database projects and `Microsoft.Build.Sql`: https://learn.microsoft.com/en-us/sql/tools/sql-database-projects/sql-database-projects
-- SQL-project Azure SQL target platform (`DSP`): https://learn.microsoft.com/en-us/sql/tools/sql-database-projects/concepts/target-platform
-- SQL pre/post-deployment script handling: https://learn.microsoft.com/en-us/sql/tools/sql-database-projects/concepts/pre-post-deployment-scripts
-- Entra access token validation: https://learn.microsoft.com/en-us/entra/identity-platform/access-tokens
-- Entra claim validation / tenant-scoped identity: https://learn.microsoft.com/en-us/entra/identity-platform/claims-validation
-- API scope authorization (`Microsoft.Identity.Web`): https://learn.microsoft.com/en-us/entra/msidweb/authentication/authorization
-- Azure SignalR negotiate: https://learn.microsoft.com/en-us/azure/azure-signalr/signalr-concept-client-negotiation
-- Azure SignalR managed identity and RBAC: https://learn.microsoft.com/en-us/azure/azure-signalr/signalr-howto-authorize-managed-identity
-- Authorize access to blobs with Microsoft Entra ID: https://learn.microsoft.com/azure/storage/blobs/authorize-access-azure-active-directory
-- Azure App Service Health check: https://learn.microsoft.com/azure/app-service/monitor-instances-health-check
-- Azure App Service common settings (Always On, HTTPS Only): https://learn.microsoft.com/azure/app-service/configure-common
-- Azure AI Document Intelligence custom models: https://learn.microsoft.com/azure/ai-services/document-intelligence/train/custom-model
-
----
-
-**Change policy:** Modify this document before the code. Change an existing contract only through an explicit compatibility/versioning decision and record it in §1.3. Keep README, `contracts/openapi.yaml` and the agent instruction files in sync with it.
