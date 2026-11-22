@@ -1,3 +1,5 @@
+using Klesia.Application.Abstractions;
+using Klesia.Infrastructure.Persistence;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -10,6 +12,10 @@ public static class DependencyInjection
         IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(configuration);
+
+        services.AddSingleton<ISqlConnectionFactory, SqlConnectionFactory>();
+        services.AddScoped<IUserRepository, UserRepository>();
+
         return services;
     }
 }
