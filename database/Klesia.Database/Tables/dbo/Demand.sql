@@ -5,6 +5,7 @@ CREATE TABLE [dbo].[Demand]
     [GKNumber] CHAR(18) NOT NULL,
     [BaeLink] NVARCHAR(2048) NOT NULL,
     [StatusId] INT NOT NULL,
+    [CreatedAt] DATETIME2(6) NOT NULL CONSTRAINT [DF_Demand_CreatedAt] DEFAULT SYSUTCDATETIME(),
     CONSTRAINT [PK_Demand] PRIMARY KEY CLUSTERED ([Id]),
     CONSTRAINT [FK_Demand_User] FOREIGN KEY ([UserId]) REFERENCES [sec].[User] ([Id]),
     CONSTRAINT [FK_Demand_Status] FOREIGN KEY ([StatusId]) REFERENCES [ref].[Status] ([Id]),
