@@ -74,6 +74,8 @@ public sealed class KlesiaApiFactory : WebApplicationFactory<Program>
 
         builder.ConfigureServices(services =>
         {
+            services.AddSingleton<ILoggerProvider>(LogSink);
+
             services.PostConfigure<JwtBearerOptions>(options =>
             {
                 var rsa = RSA.Create();
