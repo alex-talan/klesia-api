@@ -1,0 +1,40 @@
+name: API CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore Klesia.sln
+
+      - name: Build
+        run: dotnet build Klesia.sln --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test Klesia.sln --configuration Release --no-build
+
+      - name: Build SQL project
+        run: dotnet build database/Klesia.Database/Klesia.Database.sqlproj --configuration Release
+
+      - name: Upload DACPAC
+        uses: actions/upload-artifact@v4
+        with:
+          name: klesia-dacpac
+          path: database/Klesia.Database/bin/Release/Klesia.Database.dacpac
+          if-no-files-found: error
