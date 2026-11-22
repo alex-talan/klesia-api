@@ -30,9 +30,22 @@ public sealed class TestTokenFactory : IDisposable
             new("ver", "2.0")
         };
 
-        if (kind != TestTokenKind.MissingScope)
+        if (kind == TestTokenKind.MissingScope)
         {
-            claims.Add(new Claim("scp", "access_as_user"));
+        }
+        else if (kind == TestTokenKind.OtherScope)
+        {
+            claims.Add(new Claim("scp", "other.scope"));
+        }
+        else if (kind == TestTokenKind.RolesOnly)
+        {
+            claims.Add(new Claim("roles", "Api.Access"));
+        }
+        else
+        {
+            claims.Add(new Claim("scp", kind == TestTokenKind.ScopeAndDelegatedScope
+                ? "other.scope access_as_user"
+                : "access_as_user"));
         }
 
         var signingCredentials = kind switch
@@ -99,5 +112,8 @@ public enum TestTokenKind
     Unsigned,
     IdToken,
     NonGuidOid,
-    NotYetValid
+    NotYetValid,
+    OtherScope,
+    RolesOnly,
+    ScopeAndDelegatedScope
 }

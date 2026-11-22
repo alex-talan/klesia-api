@@ -37,10 +37,16 @@ builder.Services.AddKlesiaCors(builder.Configuration);
 builder.Services.AddKlesiaAuthentication(builder.Configuration);
 builder.Services.AddAuthorization(options =>
 {
-    options.FallbackPolicy = new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
+    var delegatedUser = new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
         .RequireAuthenticatedUser()
+        .AddRequirements(new DelegatedUserRequirement())
         .Build();
+
+    options.DefaultPolicy = delegatedUser;
+    options.FallbackPolicy = delegatedUser;
 });
+builder.Services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationHandler, DelegatedUserAuthorizationHandler>();
+builder.Services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationMiddlewareResultHandler, KlesiaAuthorizationResultHandler>();
 builder.Services.AddProblemDetails(options =>
 {
     options.CustomizeProblemDetails = context =>

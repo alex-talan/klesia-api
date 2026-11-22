@@ -22,6 +22,21 @@ public static class Problems
     public static IResult ServiceUnavailable() =>
         Problem(StatusCodes.Status503ServiceUnavailable, "Service Unavailable");
 
+    public static IResult Forbidden() =>
+        Problem(StatusCodes.Status403Forbidden, "Forbidden");
+
+    public static async Task WriteForbiddenAsync(HttpContext context, string? traceId)
+    {
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        await Results.Json(new
+        {
+            title = "Forbidden",
+            status = StatusCodes.Status403Forbidden,
+            traceId
+        }, contentType: "application/problem+json", statusCode: StatusCodes.Status403Forbidden)
+            .ExecuteAsync(context);
+    }
+
     public static IResult InternalServerError() =>
         Problem(StatusCodes.Status500InternalServerError, "An unexpected error occurred.");
 
