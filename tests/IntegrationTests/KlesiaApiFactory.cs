@@ -10,6 +10,7 @@ using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using System.Security.Cryptography;
+using Microsoft.AspNetCore.Routing;
 
 namespace IntegrationTests;
 
@@ -75,6 +76,7 @@ public sealed class KlesiaApiFactory : WebApplicationFactory<Program>
         builder.ConfigureServices(services =>
         {
             services.AddSingleton<ILoggerProvider>(LogSink);
+            services.AddControllers().AddApplicationPart(typeof(TestExceptionController).Assembly);
 
             services.PostConfigure<JwtBearerOptions>(options =>
             {
@@ -112,4 +114,5 @@ public sealed class KlesiaApiFactory : WebApplicationFactory<Program>
 
         base.Dispose(disposing);
     }
+
 }
