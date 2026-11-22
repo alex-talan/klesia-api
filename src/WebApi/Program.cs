@@ -1,8 +1,10 @@
 using Klesia.Application;
 using Klesia.Infrastructure;
 using Klesia.Infrastructure.Options;
+using Klesia.WebApi.Cors;
 using Klesia.WebApi.Errors;
 using Klesia.WebApi.Logging;
+using KlesiaCors = Klesia.WebApi.Cors.CorsServiceCollectionExtensions;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -18,6 +20,7 @@ builder.Services.AddKlesiaOptions(builder.Configuration);
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+builder.Services.AddKlesiaCors(builder.Configuration);
 builder.Services.AddProblemDetails(options =>
 {
     options.CustomizeProblemDetails = context =>
@@ -41,6 +44,8 @@ var app = builder.Build();
 
 app.UseKlesiaLogging();
 app.UseExceptionHandler();
+app.UseRouting();
+app.UseCors(KlesiaCors.PolicyName);
 app.UseStatusCodePages(async statusContext =>
 {
     if (statusContext.HttpContext.Response.HasStarted)
