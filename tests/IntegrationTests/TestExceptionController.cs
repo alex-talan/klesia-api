@@ -11,4 +11,10 @@ public sealed class TestExceptionController : ControllerBase
     {
         throw new InvalidOperationException("SENSITIVE_TEST_EXCEPTION_TEXT");
     }
+
+    [HttpGet("https")]
+    public string HttpsScheme()
+    {
+        return HttpContext.Request.Scheme;
+    }
 }

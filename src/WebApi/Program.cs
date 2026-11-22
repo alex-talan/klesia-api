@@ -4,6 +4,7 @@ using Klesia.Infrastructure.Options;
 using Klesia.WebApi.Cors;
 using Klesia.WebApi.Errors;
 using Klesia.WebApi.Logging;
+using Microsoft.AspNetCore.HttpOverrides;
 using KlesiaCors = Klesia.WebApi.Cors.CorsServiceCollectionExtensions;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -15,6 +16,17 @@ builder.Logging.AddJsonConsole(options =>
 {
     options.IncludeScopes = true;
 });
+
+if (string.Equals(
+    Environment.GetEnvironmentVariable("ASPNETCORE_FORWARDEDHEADERS_ENABLED"),
+    "true",
+    StringComparison.OrdinalIgnoreCase))
+{
+    builder.Services.Configure<ForwardedHeadersOptions>(options =>
+    {
+        options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    });
+}
 
 builder.Services.AddKlesiaOptions(builder.Configuration);
 builder.Services.AddApplication();
@@ -42,6 +54,7 @@ builder.Services.AddOpenApi();
 
 var app = builder.Build();
 
+app.UseForwardedHeaders();
 app.UseKlesiaLogging();
 app.UseExceptionHandler();
 app.UseRouting();

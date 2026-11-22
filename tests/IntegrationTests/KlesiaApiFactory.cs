@@ -20,6 +20,14 @@ public sealed class KlesiaApiFactory : WebApplicationFactory<Program>
 
     public TestTokenFactory Tokens { get; } = new();
 
+    private readonly string? _previousForwardedHeadersSetting =
+        Environment.GetEnvironmentVariable("ASPNETCORE_FORWARDEDHEADERS_ENABLED");
+
+    public KlesiaApiFactory()
+    {
+        Environment.SetEnvironmentVariable("ASPNETCORE_FORWARDEDHEADERS_ENABLED", "true");
+    }
+
     public WebApplicationFactory<Program> WithServices(Action<IServiceCollection> configureServices)
     {
         return WithWebHostBuilder(builder =>
@@ -110,6 +118,9 @@ public sealed class KlesiaApiFactory : WebApplicationFactory<Program>
         {
             Tokens.Dispose();
             LogSink.Dispose();
+            Environment.SetEnvironmentVariable(
+                "ASPNETCORE_FORWARDEDHEADERS_ENABLED",
+                _previousForwardedHeadersSetting);
         }
 
         base.Dispose(disposing);
