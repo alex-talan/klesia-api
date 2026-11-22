@@ -13,7 +13,8 @@ public sealed class IntegrationTestHarnessTests
 
         var response = await client.GetAsync("/openapi/v1.json");
 
-        response.StatusCode.Should().Be(System.Net.HttpStatusCode.NotFound);
+        response.StatusCode.Should().Be(System.Net.HttpStatusCode.Unauthorized);
+        response.Content.Headers.ContentType?.MediaType.Should().Be("application/problem+json");
     }
 
     [Fact]

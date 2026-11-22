@@ -5,8 +5,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.IdentityModel.Protocols;
-using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using System.Security.Cryptography;
@@ -22,10 +20,16 @@ public sealed class KlesiaApiFactory : WebApplicationFactory<Program>
 
     private readonly string? _previousForwardedHeadersSetting =
         Environment.GetEnvironmentVariable("ASPNETCORE_FORWARDEDHEADERS_ENABLED");
+    private readonly string? _previousAzureAdInstance = Environment.GetEnvironmentVariable("AzureAd__Instance");
+    private readonly string? _previousAzureAdTenant = Environment.GetEnvironmentVariable("AzureAd__TenantId");
+    private readonly string? _previousAzureAdClient = Environment.GetEnvironmentVariable("AzureAd__ClientId");
 
     public KlesiaApiFactory()
     {
         Environment.SetEnvironmentVariable("ASPNETCORE_FORWARDEDHEADERS_ENABLED", "true");
+        Environment.SetEnvironmentVariable("AzureAd__Instance", "https://login.microsoftonline.com/");
+        Environment.SetEnvironmentVariable("AzureAd__TenantId", TestTokenFactory.TenantId);
+        Environment.SetEnvironmentVariable("AzureAd__ClientId", "22222222-2222-2222-2222-222222222222");
     }
 
     public WebApplicationFactory<Program> WithServices(Action<IServiceCollection> configureServices)
@@ -81,23 +85,21 @@ public sealed class KlesiaApiFactory : WebApplicationFactory<Program>
             logging.AddProvider(LogSink);
         });
 
-        builder.ConfigureServices(services =>
+        builder.ConfigureTestServices(services =>
         {
             services.AddSingleton<ILoggerProvider>(LogSink);
             services.AddControllers().AddApplicationPart(typeof(TestExceptionController).Assembly);
 
-            services.PostConfigure<JwtBearerOptions>(options =>
+            services.Configure<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme, options =>
             {
                 var rsa = RSA.Create();
                 rsa.ImportParameters(Tokens.SigningKeyParameters);
 
-                var configuration = new OpenIdConnectConfiguration
-                {
-                    Issuer = TestTokenFactory.Issuer
-                };
-                configuration.SigningKeys.Add(new RsaSecurityKey(rsa));
+                var signingKey = new RsaSecurityKey(rsa) { KeyId = TestTokenFactory.SigningKeyId };
 
-                options.ConfigurationManager = new StaticConfigurationManager<OpenIdConnectConfiguration>(configuration);
+                options.ConfigurationManager = null;
+                options.Authority = null;
+                options.RequireHttpsMetadata = false;
                 options.TokenValidationParameters = new TokenValidationParameters
                 {
                     ValidIssuer = TestTokenFactory.Issuer,
@@ -106,7 +108,8 @@ public sealed class KlesiaApiFactory : WebApplicationFactory<Program>
                     ValidateAudience = true,
                     ValidateLifetime = true,
                     ValidateIssuerSigningKey = true,
-                    IssuerSigningKey = new RsaSecurityKey(rsa)
+                    IssuerSigningKey = signingKey,
+                    IssuerSigningKeys = [signingKey]
                 };
             });
         });
@@ -121,6 +124,9 @@ public sealed class KlesiaApiFactory : WebApplicationFactory<Program>
             Environment.SetEnvironmentVariable(
                 "ASPNETCORE_FORWARDEDHEADERS_ENABLED",
                 _previousForwardedHeadersSetting);
+            Environment.SetEnvironmentVariable("AzureAd__Instance", _previousAzureAdInstance);
+            Environment.SetEnvironmentVariable("AzureAd__TenantId", _previousAzureAdTenant);
+            Environment.SetEnvironmentVariable("AzureAd__ClientId", _previousAzureAdClient);
         }
 
         base.Dispose(disposing);

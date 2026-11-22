@@ -7,19 +7,19 @@ namespace IntegrationTests;
 public sealed class ProblemDetailsTests
 {
     [Fact]
-    public async Task UnknownRouteReturnsProblemDetailsWithMatchingTraceId()
+    public async Task UnknownRouteReturnsUnauthorizedProblemDetailsWithMatchingTraceId()
     {
         using var factory = new KlesiaApiFactory();
         using var client = factory.CreateClient();
 
         var response = await client.GetAsync("/api/v1/unknown");
 
-        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         response.Content.Headers.ContentType?.MediaType.Should().Be("application/problem+json");
 
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        document.RootElement.GetProperty("title").GetString().Should().Be("Not Found");
-        document.RootElement.GetProperty("status").GetInt32().Should().Be(404);
+        document.RootElement.GetProperty("title").GetString().Should().Be("Unauthorized");
+        document.RootElement.GetProperty("status").GetInt32().Should().Be(401);
         var traceId = document.RootElement.GetProperty("traceId").GetString();
         traceId.Should().Be(response.Headers.GetValues("X-Correlation-Id").Single());
     }
