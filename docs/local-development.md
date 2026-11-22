@@ -49,24 +49,56 @@ Open `src/WebApi/appsettings.Development.json`: it holds placeholders. **Do not 
   "AzureAd": {
     "TenantId": "<tenant guid>",
     "ClientId": "<API app registration (client) id>",
-    "RequiredScope": "<delegated scope name, e.g. access_as_user>"
+    "RequiredScope": "access_as_user"
   },
   "Cors": {
     "AllowedOrigins": [ "http://localhost:5173" ]
+  },
+  "Storage": {
+    "BlobServiceUri": "https://<account>.blob.core.windows.net",
+    "ContainerName": "<private container>"
+  },
+  "Upload": {
+    "MaxPdfSizeMb": 10
+  },
+  "DocumentIntelligence": {
+    "Endpoint": "https://<resource>.cognitiveservices.azure.com/",
+    "ModelId": "<BAE model id>",
+    "TimeoutSeconds": 120
+  },
+  "Extraction": {
+    "MaxConcurrency": 2,
+    "QueueCapacity": 100,
+    "StaleAfterMinutes": 15,
+    "SweepIntervalMinutes": 5
+  },
+  "AzureSignalR": {
+    "Endpoint": "https://<resource>.service.signalr.net",
+    "HubName": "demands"
   }
 }
 ```
 
-Equivalent environment variables: `ConnectionStrings__KlesiaDb`, `AzureAd__TenantId`, `AzureAd__ClientId`, `AzureAd__RequiredScope`, `Cors__AllowedOrigins__0`.
+`AzureAd:Instance` defaults to `https://login.microsoftonline.com/`; `AzureAd:RequiredScope` is fixed at `access_as_user`. `Upload:MaxPdfSizeMb` is provisionally `10` and must match the webapp's runtime `maxPdfSizeMb`. Document Intelligence settings become mandatory when the extraction adapter is wired (T-065); their keys are shown here for the complete local configuration and must remain placeholders until real values are supplied.
+
+Equivalent environment variables include `ConnectionStrings__KlesiaDb`, `AzureAd__TenantId`, `AzureAd__ClientId`, `AzureAd__RequiredScope`, `Cors__AllowedOrigins__0`, `Storage__BlobServiceUri`, `Storage__ContainerName`, `Upload__MaxPdfSizeMb`, `DocumentIntelligence__Endpoint`, `DocumentIntelligence__ModelId`, `DocumentIntelligence__TimeoutSeconds`, `Extraction__MaxConcurrency`, `Extraction__QueueCapacity`, `Extraction__StaleAfterMinutes`, `Extraction__SweepIntervalMinutes`, `AzureSignalR__Endpoint`, `AzureSignalR__HubName`.
 
 | Setting | Meaning |
 |---|---|
+| `AzureAd:Instance` | Entra authority base URL; defaults to `https://login.microsoftonline.com/`. |
 | `AzureAd:TenantId` | The single Entra tenant allowed to call the API. |
 | `AzureAd:ClientId` | Application (client) ID of the **API** app registration (the token audience). |
 | `AzureAd:RequiredScope` | Name of the delegated permission exposed by the API (e.g. `access_as_user`), not the full `api://…` URI. |
 | `Cors:AllowedOrigins` | Exact frontend origins: `http://localhost:5173` and your deployed Static Web App URL. |
 | `Storage:BlobServiceUri` | Blob endpoint of the storage account holding the PDFs, `https://<account>.blob.core.windows.net`. |
 | `Storage:ContainerName` | Name of the private container for the PDFs. |
+| `Upload:MaxPdfSizeMb` | Provisional upload limit, `10` MB; must equal the webapp's `maxPdfSizeMb` and fit the request limits. |
+| `DocumentIntelligence:Endpoint`, `DocumentIntelligence:ModelId` | Endpoint and custom BAE model id supplied by the Document Intelligence owners; no key is used. These become mandatory when extraction is wired (T-065). |
+| `DocumentIntelligence:TimeoutSeconds` | Analysis timeout; defaults to `120` seconds. |
+| `Extraction:MaxConcurrency`, `Extraction:QueueCapacity` | Background worker concurrency and queue capacity; defaults to `2` and `100`. |
+| `Extraction:StaleAfterMinutes`, `Extraction:SweepIntervalMinutes` | Recovery sweep age and interval; defaults to `15` and `5` minutes. Stale age must exceed the Document Intelligence timeout. |
+| `AzureSignalR:Endpoint` | Azure SignalR resource endpoint; access uses the configured managed identity (no access key). |
+| `AzureSignalR:HubName` | Hub identifier; fixed to `demands`. |
 
 On the Azure App Service set the application setting `AZURE_CLIENT_ID` to the client id of the user-assigned managed identity, so `DefaultAzureCredential` picks it (see [`deployment-app-service.md`](deployment-app-service.md)).
 
