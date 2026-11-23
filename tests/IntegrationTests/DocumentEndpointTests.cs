@@ -222,7 +222,15 @@ public sealed class DemandDocumentEndpointTests
             .Returns(Task.FromResult(new Klesia.Application.Documents.BaeDocumentReadResult(
                 blockingStream,
                 null)));
-        var service = new DemandService(new AuthorizedUserResolver(users), demands, store);
+        var service = new DemandService(
+            new AuthorizedUserResolver(users),
+            demands,
+            store,
+            Substitute.For<INotifier>(),
+            Substitute.For<IExtractionQueue>(),
+            new CreateDemandValidator(),
+            Substitute.For<IDemandCreationSettings>(),
+            NullLogger<DemandService>.Instance);
         var principal = Substitute.For<ICurrentPrincipal>();
         principal.GetOid(Arg.Any<System.Security.Claims.ClaimsPrincipal>()).Returns(OwnerOid);
         var controller = new DemandsController(service, principal, NullLogger<DemandsController>.Instance);

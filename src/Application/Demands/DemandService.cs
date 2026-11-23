@@ -1,6 +1,7 @@
 using Klesia.Application.Abstractions;
 using Klesia.Application.Authorization;
 using Klesia.Application.Documents;
+using Microsoft.Extensions.Logging;
 
 namespace Klesia.Application.Demands;
 
@@ -9,15 +10,39 @@ public sealed class DemandService
     private readonly AuthorizedUserResolver _authorizedUserResolver;
     private readonly IDemandRepository _demandRepository;
     private readonly IBaeDocumentStore _documentStore;
+    private readonly INotifier _notifier;
+    private readonly IExtractionQueue _extractionQueue;
+    private readonly CreateDemandValidator _createDemandValidator;
+    private readonly IDemandCreationSettings _creationSettings;
+    private readonly ILogger<DemandService> _logger;
 
     public DemandService(
         AuthorizedUserResolver authorizedUserResolver,
         IDemandRepository demandRepository,
-        IBaeDocumentStore documentStore)
+        IBaeDocumentStore documentStore,
+        INotifier notifier,
+        IExtractionQueue extractionQueue,
+        CreateDemandValidator createDemandValidator,
+        IDemandCreationSettings creationSettings,
+        ILogger<DemandService> logger)
     {
+        ArgumentNullException.ThrowIfNull(authorizedUserResolver);
+        ArgumentNullException.ThrowIfNull(demandRepository);
+        ArgumentNullException.ThrowIfNull(documentStore);
+        ArgumentNullException.ThrowIfNull(notifier);
+        ArgumentNullException.ThrowIfNull(extractionQueue);
+        ArgumentNullException.ThrowIfNull(createDemandValidator);
+        ArgumentNullException.ThrowIfNull(creationSettings);
+        ArgumentNullException.ThrowIfNull(logger);
+
         _authorizedUserResolver = authorizedUserResolver;
         _demandRepository = demandRepository;
         _documentStore = documentStore;
+        _notifier = notifier;
+        _extractionQueue = extractionQueue;
+        _createDemandValidator = createDemandValidator;
+        _creationSettings = creationSettings;
+        _logger = logger;
     }
 
     public async Task<UserDemandsResult> ListAsync(Guid oid, CancellationToken cancellationToken)
@@ -65,5 +90,102 @@ public sealed class DemandService
         {
             throw new StoredDocumentIntegrityException(demandId);
         }
+    }
+
+    public async Task<CreateDemandResult> CreateAsync(
+        Guid oid,
+        CreateDemandInput input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+
+        var user = await _authorizedUserResolver.ResolveAsync(oid, cancellationToken);
+        var validation = await _createDemandValidator.ValidateAsync(
+            new CreateDemandValidationInput(
+                input.GkNumber,
+                input.DeclaredContentType,
+                input.Length,
+                input.Content),
+            _creationSettings.MaxPdfSizeBytes,
+            cancellationToken);
+
+        if (validation is CreateDemandValidationResult.Invalid invalid)
+        {
+            return new CreateDemandResult.Invalid(invalid.Errors);
+        }
+
+        if (validation is CreateDemandValidationResult.TooLarge)
+        {
+            return new CreateDemandResult.TooLarge();
+        }
+
+        if (validation is CreateDemandValidationResult.Unprocessable unprocessable)
+        {
+            return new CreateDemandResult.Unprocessable(unprocessable.Errors);
+        }
+
+        var valid = (CreateDemandValidationResult.Valid)validation;
+        Uri blobUrl;
+        try
+        {
+            blobUrl = await _documentStore.UploadAsync(
+                user.UserUniqueId,
+                valid.PdfContent,
+                cancellationToken);
+        }
+        catch (DocumentStoreUnavailableException)
+        {
+            return new CreateDemandResult.StorageUnavailable();
+        }
+
+        var gkNumber = Domain.Demands.GKNumber.Create(input.GkNumber);
+        int demandId;
+        try
+        {
+            demandId = await _demandRepository.CreatePendingAsync(
+                user.Id,
+                gkNumber,
+                blobUrl,
+                cancellationToken);
+        }
+        catch
+        {
+            try
+            {
+                await _documentStore.DeleteAsync(blobUrl, CancellationToken.None);
+            }
+            catch (Exception)
+            {
+                _logger.LogWarning("Best-effort BAE cleanup failed after demand insert failure.");
+            }
+
+            throw;
+        }
+
+        try
+        {
+            await _notifier.NotifyDemandsChangedAsync(user.UserUniqueId, cancellationToken);
+        }
+        catch (Exception)
+        {
+            _logger.LogWarning("Demand change notification failed after demand commit.");
+        }
+
+        try
+        {
+            _ = _extractionQueue.TryEnqueue(demandId);
+        }
+        catch (Exception)
+        {
+            _logger.LogWarning(
+                "Extraction queue enqueue failed; demand will be recovered by the sweep. DemandId: {DemandId}",
+                demandId);
+        }
+
+        return new CreateDemandResult.Created(new Domain.Demands.Demand(
+            demandId,
+            user.Id,
+            gkNumber,
+            Domain.Demands.DemandStatus.Pending));
     }
 }

@@ -51,6 +51,7 @@ public static class DependencyInjection
         services.AddSingleton<ISqlConnectionFactory, SqlConnectionFactory>();
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IDemandRepository, DemandRepository>();
+        services.AddSingleton<IDemandCreationSettings, UploadDemandCreationSettings>();
         services.AddSingleton(serviceProvider =>
         {
             var storage = serviceProvider.GetRequiredService<IOptions<StorageOptions>>().Value;
