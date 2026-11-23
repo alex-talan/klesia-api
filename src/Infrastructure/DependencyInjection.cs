@@ -17,6 +17,7 @@ public static class DependencyInjection
 
         services.AddSingleton<ISqlConnectionFactory, SqlConnectionFactory>();
         services.AddScoped<IUserRepository, UserRepository>();
+        services.AddScoped<IDemandRepository, DemandRepository>();
         services.AddSingleton<ISqlHealthProbe, SqlHealthProbe>();
         services.AddSingleton<IHealthCheck, SqlHealthCheck>();
 
