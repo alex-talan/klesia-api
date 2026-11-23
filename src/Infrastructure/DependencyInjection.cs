@@ -2,6 +2,7 @@ using Azure.Core;
 using Azure.Identity;
 using Azure.Storage.Blobs;
 using Klesia.Application.Abstractions;
+using Klesia.Application.Notifications;
 using Klesia.Infrastructure.Documents;
 using Klesia.Infrastructure.Health;
 using Klesia.Infrastructure.Notifications;
@@ -40,6 +41,7 @@ public static class DependencyInjection
         services.AddSingleton<IDemandsHubClient>(serviceProvider =>
             serviceProvider.GetRequiredService<AzureSignalRHubClient>());
         services.AddSingleton<INotifier, AzureSignalRNotifier>();
+        services.AddScoped<IRealtimeNegotiator, AzureSignalRNegotiator>();
         services.AddSingleton<ISqlConnectionFactory, SqlConnectionFactory>();
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IDemandRepository, DemandRepository>();

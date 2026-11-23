@@ -32,7 +32,8 @@ public sealed class CorsTests
         using var request = CreatePreflight(
             "/api/v1/notifications/negotiate",
             AllowedOrigin,
-            "X-Requested-With, X-SignalR-User-Agent");
+            "Authorization, X-Requested-With, X-SignalR-User-Agent",
+            "POST");
 
         var response = await client.SendAsync(request);
 
@@ -41,6 +42,7 @@ public sealed class CorsTests
         var allowedHeaders = response.Headers.GetValues("Access-Control-Allow-Headers").Single();
         allowedHeaders.Should().Contain("X-Requested-With");
         allowedHeaders.Should().Contain("X-SignalR-User-Agent");
+        response.Headers.GetValues("Access-Control-Allow-Methods").Single().Should().Contain("POST");
         response.Headers.Contains("Access-Control-Allow-Credentials").Should().BeFalse();
     }
 
@@ -87,11 +89,15 @@ public sealed class CorsTests
         response.Headers.Contains("Access-Control-Allow-Credentials").Should().BeFalse();
     }
 
-    private static HttpRequestMessage CreatePreflight(string path, string origin, string requestedHeaders)
+    private static HttpRequestMessage CreatePreflight(
+        string path,
+        string origin,
+        string requestedHeaders,
+        string requestedMethod = "GET")
     {
         var request = new HttpRequestMessage(HttpMethod.Options, path);
         request.Headers.Add("Origin", origin);
-        request.Headers.Add("Access-Control-Request-Method", "GET");
+        request.Headers.Add("Access-Control-Request-Method", requestedMethod);
         request.Headers.Add("Access-Control-Request-Headers", requestedHeaders);
         return request;
     }

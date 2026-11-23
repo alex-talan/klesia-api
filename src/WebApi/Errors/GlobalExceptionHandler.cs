@@ -1,6 +1,7 @@
 using System.Net;
 using Klesia.Application.Authorization;
 using Klesia.Application.Documents;
+using Klesia.Application.Notifications;
 using Microsoft.AspNetCore.Diagnostics;
 
 namespace Klesia.WebApi.Errors;
@@ -23,6 +24,16 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
         {
             var forbiddenTraceId = GetCorrelationId(httpContext);
             await Problems.WriteForbiddenAsync(httpContext, forbiddenTraceId);
+            return true;
+        }
+
+        if (exception is RealtimeNegotiationUnavailableException)
+        {
+            _logger.LogWarning(
+                "Azure SignalR negotiation unavailable for {Method} {RouteTemplate}.",
+                httpContext.Request.Method,
+                GetRouteTemplate(httpContext));
+            await Problems.WriteServiceUnavailableAsync(httpContext, GetCorrelationId(httpContext));
             return true;
         }
 
