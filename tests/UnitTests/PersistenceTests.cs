@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Klesia.Application.Abstractions;
 using Klesia.Infrastructure;
+using Klesia.Infrastructure.Documents;
 using Klesia.Infrastructure.Persistence;
 using Klesia.Infrastructure.Options;
 using Microsoft.Extensions.Configuration;
@@ -17,7 +18,9 @@ public sealed class PersistenceTests
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["ConnectionStrings:KlesiaDb"] = "Server=tcp:test.database.windows.net,1433;Database=KlesiaTest;Authentication=Active Directory Default"
+                ["ConnectionStrings:KlesiaDb"] = "Server=tcp:test.database.windows.net,1433;Database=KlesiaTest;Authentication=Active Directory Default",
+                ["Storage:BlobServiceUri"] = "https://test.blob.core.windows.net",
+                ["Storage:ContainerName"] = "bae"
             })
             .Build();
 
@@ -29,6 +32,7 @@ public sealed class PersistenceTests
 
         using var scope = provider.CreateScope();
         scope.ServiceProvider.GetService<IUserRepository>().Should().BeOfType<UserRepository>();
+        scope.ServiceProvider.GetService<IBaeDocumentStore>().Should().BeOfType<AzureBaeDocumentStore>();
 
         using var connection = provider.GetRequiredService<ISqlConnectionFactory>().CreateConnection();
         connection.Should().BeOfType<Microsoft.Data.SqlClient.SqlConnection>();
