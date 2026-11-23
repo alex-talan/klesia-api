@@ -12,6 +12,7 @@ public static class DependencyInjection
         services.AddScoped<AuthorizedUserResolver>();
         services.AddScoped<DemandService>();
         services.AddScoped<NegotiateNotificationsService>();
+        services.AddSingleton<CreateDemandValidator>();
         return services;
     }
 }
