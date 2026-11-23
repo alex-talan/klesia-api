@@ -64,6 +64,65 @@ public sealed class DemandRepositoryTests
         }
     }
 
+    [SqlFact]
+    public async Task GetOwnedBaeLinkAsync_ReturnsLinkOnlyForMatchingDemandAndUser()
+    {
+        var roleCode = $"owned-link-repository-{Guid.NewGuid():N}";
+        var ownerOid = Guid.NewGuid();
+        var otherOid = Guid.NewGuid();
+        var ownerBlobUrl = $"https://contoso.blob.core.windows.net/bae/{Guid.NewGuid():N}.pdf";
+
+        try
+        {
+            await using var setupConnection = new SqlConnection(ConnectionString);
+            await setupConnection.OpenAsync();
+
+            var roleId = await setupConnection.ExecuteScalarAsync<int>(
+                "INSERT INTO sec.Role (Name, Code) OUTPUT INSERTED.Id VALUES (@Name, @Code);",
+                new { Name = roleCode, Code = roleCode });
+            var ownerId = await InsertUserAsync(setupConnection, roleId, ownerOid, "Repository test owner");
+            var otherId = await InsertUserAsync(setupConnection, roleId, otherOid, "Repository test other");
+            var pendingStatusId = await GetStatusIdAsync(setupConnection, "pending");
+            var ownedDemandId = await InsertDemandAsync(
+                setupConnection,
+                ownerId,
+                pendingStatusId,
+                "GK260902-144743124",
+                ownerBlobUrl);
+            var otherDemandId = await InsertDemandAsync(
+                setupConnection,
+                otherId,
+                pendingStatusId,
+                "GK260902-144743125",
+                $"https://contoso.blob.core.windows.net/bae/{Guid.NewGuid():N}.pdf");
+
+            var repository = new DemandRepository(
+                new SqlConnectionFactory(Options.Create(new DatabaseOptions { KlesiaDb = ConnectionString })));
+
+            (await repository.GetOwnedBaeLinkAsync(ownedDemandId, ownerId, CancellationToken.None))
+                .Should()
+                .Be(ownerBlobUrl);
+            (await repository.GetOwnedBaeLinkAsync(otherDemandId, ownerId, CancellationToken.None))
+                .Should()
+                .BeNull();
+            (await repository.GetOwnedBaeLinkAsync(int.MaxValue, ownerId, CancellationToken.None))
+                .Should()
+                .BeNull();
+        }
+        finally
+        {
+            await using var cleanupConnection = new SqlConnection(ConnectionString);
+            await cleanupConnection.OpenAsync();
+            await cleanupConnection.ExecuteAsync(
+                "DELETE d FROM dbo.Demand AS d "
+                + "INNER JOIN sec.[User] AS u ON u.Id = d.UserId "
+                + "WHERE u.UserUniqueId IN (@OwnerOid, @OtherOid); "
+                + "DELETE FROM sec.[User] WHERE UserUniqueId IN (@OwnerOid, @OtherOid); "
+                + "DELETE FROM sec.Role WHERE Code = @RoleCode;",
+                new { OwnerOid = ownerOid, OtherOid = otherOid, RoleCode = roleCode });
+        }
+    }
+
     private static async Task<int> InsertUserAsync(
         SqlConnection connection,
         int roleId,
@@ -83,20 +142,21 @@ public sealed class DemandRepositoryTests
             new { Code = code });
     }
 
-    private static async Task InsertDemandAsync(
+    private static async Task<int> InsertDemandAsync(
         SqlConnection connection,
         int userId,
         int statusId,
-        string gkNumber)
+        string gkNumber,
+        string? baeLink = null)
     {
-        await connection.ExecuteAsync(
+        return await connection.ExecuteScalarAsync<int>(
             "INSERT INTO dbo.Demand (UserId, GKNumber, BaeLink, StatusId) "
-            + "VALUES (@UserId, @GKNumber, @BaeLink, @StatusId);",
+            + "OUTPUT INSERTED.Id VALUES (@UserId, @GKNumber, @BaeLink, @StatusId);",
             new
             {
                 UserId = userId,
                 GKNumber = gkNumber,
-                BaeLink = $"https://contoso.blob.core.windows.net/bae/{Guid.NewGuid():N}.pdf",
+                BaeLink = baeLink ?? $"https://contoso.blob.core.windows.net/bae/{Guid.NewGuid():N}.pdf",
                 StatusId = statusId,
             });
     }
