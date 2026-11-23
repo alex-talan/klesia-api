@@ -1,5 +1,6 @@
 using Dapper;
 using FluentAssertions;
+using Klesia.Domain.Demands;
 using Klesia.Infrastructure.Options;
 using Klesia.Infrastructure.Persistence;
 using Microsoft.Data.SqlClient;
@@ -123,6 +124,69 @@ public sealed class DemandRepositoryTests
         }
     }
 
+    [SqlFact]
+    public async Task CreatePendingAsync_UsesPendingStatusAndDatabaseCreatedAt_AndAllowsDuplicateGkNumbers()
+    {
+        const string gkNumber = "GK260902-144743126";
+        var roleCode = $"create-demand-repository-{Guid.NewGuid():N}";
+        var ownerOid = Guid.NewGuid();
+        var firstBlobUrl = new Uri($"https://contoso.blob.core.windows.net/bae/{Guid.NewGuid():N}.pdf");
+        var secondBlobUrl = new Uri($"https://contoso.blob.core.windows.net/bae/{Guid.NewGuid():N}.pdf");
+
+        try
+        {
+            await using var setupConnection = new SqlConnection(ConnectionString);
+            await setupConnection.OpenAsync();
+
+            var roleId = await setupConnection.ExecuteScalarAsync<int>(
+                "INSERT INTO sec.Role (Name, Code) OUTPUT INSERTED.Id VALUES (@Name, @Code);",
+                new { Name = roleCode, Code = roleCode });
+            var ownerId = await InsertUserAsync(setupConnection, roleId, ownerOid, "Repository test owner");
+            var repository = new DemandRepository(
+                new SqlConnectionFactory(Options.Create(new DatabaseOptions { KlesiaDb = ConnectionString })));
+
+            var firstDemandId = await repository.CreatePendingAsync(
+                ownerId,
+                GKNumber.Create(gkNumber),
+                firstBlobUrl,
+                CancellationToken.None);
+            var secondDemandId = await repository.CreatePendingAsync(
+                ownerId,
+                GKNumber.Create(gkNumber),
+                secondBlobUrl,
+                CancellationToken.None);
+
+            firstDemandId.Should().BeGreaterThan(0);
+            secondDemandId.Should().BeGreaterThan(firstDemandId);
+            var createdDemands = await setupConnection.QueryAsync<CreatedDemandRow>(
+                "SELECT s.Code AS StatusCode, d.CreatedAt "
+                + "FROM dbo.Demand AS d INNER JOIN ref.Status AS s ON s.Id = d.StatusId "
+                + "WHERE d.Id IN (@FirstDemandId, @SecondDemandId);",
+                new { FirstDemandId = firstDemandId, SecondDemandId = secondDemandId });
+
+            createdDemands.Should().HaveCount(2);
+            createdDemands.Should().OnlyContain(demand =>
+                demand.StatusCode == "pending" && demand.CreatedAt != default);
+            (await setupConnection.ExecuteScalarAsync<int>(
+                "SELECT COUNT(*) FROM dbo.Demand WHERE UserId = @UserId AND GKNumber = @GKNumber;",
+                new { UserId = ownerId, GKNumber = gkNumber }))
+                .Should()
+                .Be(2);
+        }
+        finally
+        {
+            await using var cleanupConnection = new SqlConnection(ConnectionString);
+            await cleanupConnection.OpenAsync();
+            await cleanupConnection.ExecuteAsync(
+                "DELETE d FROM dbo.Demand AS d "
+                + "INNER JOIN sec.[User] AS u ON u.Id = d.UserId "
+                + "WHERE u.UserUniqueId = @OwnerOid; "
+                + "DELETE FROM sec.[User] WHERE UserUniqueId = @OwnerOid; "
+                + "DELETE FROM sec.Role WHERE Code = @RoleCode;",
+                new { OwnerOid = ownerOid, RoleCode = roleCode });
+        }
+    }
+
     private static async Task<int> InsertUserAsync(
         SqlConnection connection,
         int roleId,
@@ -160,4 +224,6 @@ public sealed class DemandRepositoryTests
                 StatusId = statusId,
             });
     }
+
+    private sealed record CreatedDemandRow(string StatusCode, DateTime CreatedAt);
 }

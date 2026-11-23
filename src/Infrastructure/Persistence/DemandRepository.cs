@@ -1,3 +1,4 @@
+using System.Data;
 using Dapper;
 using Klesia.Application.Abstractions;
 using Klesia.Domain.Demands;
@@ -15,6 +16,14 @@ public sealed class DemandRepository : IDemandRepository
         INNER JOIN ref.Status AS s ON s.Id = d.StatusId
         WHERE d.UserId = @UserId
         ORDER BY d.Id DESC;
+        """;
+
+    private const string CreatePendingSql = """
+        INSERT INTO dbo.Demand (UserId, GKNumber, BaeLink, StatusId)
+        OUTPUT INSERTED.Id
+        SELECT @UserId, @GKNumber, @BaeLink, s.Id
+        FROM ref.Status AS s
+        WHERE s.Code = @PendingCode;
         """;
 
         private const string GetOwnedBaeLinkSql = """
@@ -66,6 +75,30 @@ public sealed class DemandRepository : IDemandRepository
                 GetOwnedBaeLinkSql,
                 new { DemandId = demandId, UserId = userId },
                 cancellationToken: cancellationToken));
+    }
+
+    public async Task<int> CreatePendingAsync(
+        int userId,
+        GKNumber gkNumber,
+        Uri blobUrl,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(gkNumber);
+        ArgumentNullException.ThrowIfNull(blobUrl);
+
+        var parameters = new DynamicParameters();
+        parameters.Add("UserId", userId, DbType.Int32);
+        parameters.Add("GKNumber", gkNumber.Value, DbType.AnsiStringFixedLength, size: 18);
+        parameters.Add("BaeLink", blobUrl.AbsoluteUri, DbType.String, size: 2048);
+        parameters.Add("PendingCode", "pending", DbType.String, size: 7);
+
+        await using var connection = (SqlConnection)_connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        var demandId = await connection.QuerySingleOrDefaultAsync<int?>(
+            new CommandDefinition(CreatePendingSql, parameters, cancellationToken: cancellationToken));
+
+        return demandId ?? throw new InvalidOperationException("The pending demand status is missing.");
     }
 
     private sealed record DemandRow(int DemandId, string GKNumber, string StatusCode);
