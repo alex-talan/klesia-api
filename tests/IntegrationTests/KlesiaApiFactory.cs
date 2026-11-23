@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Klesia.Infrastructure.Health;
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.Routing;
 

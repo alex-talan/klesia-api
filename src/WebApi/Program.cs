@@ -1,9 +1,11 @@
 using Klesia.Application;
 using Klesia.Infrastructure;
+using Klesia.Infrastructure.Health;
 using Klesia.Infrastructure.Options;
 using Klesia.WebApi.Authentication;
 using Klesia.WebApi.Cors;
 using Klesia.WebApi.Errors;
+using Klesia.WebApi.Health;
 using Klesia.WebApi.Logging;
 using Microsoft.AspNetCore.HttpOverrides;
 using KlesiaCors = Klesia.WebApi.Cors.CorsServiceCollectionExtensions;
@@ -66,6 +68,7 @@ builder.Services.AddProblemDetails(options =>
 });
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
+builder.Services.AddHealthChecks().AddCheck<SqlHealthCheck>("sql");
 
 var app = builder.Build();
 
@@ -115,6 +118,16 @@ if (app.Environment.IsDevelopment())
 }
 
 app.MapControllers();
+app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
+{
+    ResponseWriter = HealthResponseWriter.WriteAsync,
+    ResultStatusCodes =
+    {
+        [Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Healthy] = StatusCodes.Status200OK,
+        [Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Degraded] = StatusCodes.Status503ServiceUnavailable,
+        [Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Unhealthy] = StatusCodes.Status503ServiceUnavailable
+    }
+}).AllowAnonymous();
 
 app.Run();
 
