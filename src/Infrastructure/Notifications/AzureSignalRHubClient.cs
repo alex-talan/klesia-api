@@ -1,6 +1,7 @@
 using Klesia.Infrastructure.Options;
 using Microsoft.Azure.SignalR.Management;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Logging;
 
 namespace Klesia.Infrastructure.Notifications;
 
@@ -8,10 +9,12 @@ internal sealed class AzureSignalRHubClient : IDemandsHubClient, IAsyncDisposabl
 {
     private readonly ServiceManager _serviceManager;
     private readonly string _hubName;
+    private readonly ILogger<AzureSignalRNotifier> _logger;
     private readonly Lazy<Task<ServiceHubContext>> _hubContext;
 
     public AzureSignalRHubClient(
         ServiceManager serviceManager,
+        ILogger<AzureSignalRNotifier> logger,
         IOptions<AzureSignalROptions> options)
     {
         ArgumentNullException.ThrowIfNull(serviceManager);
@@ -19,6 +22,7 @@ internal sealed class AzureSignalRHubClient : IDemandsHubClient, IAsyncDisposabl
 
         _serviceManager = serviceManager;
         _hubName = options.Value.HubName;
+        _logger = logger;
         _hubContext = new Lazy<Task<ServiceHubContext>>(
             () => _serviceManager.CreateHubContextAsync(_hubName, CancellationToken.None));
     }
@@ -57,6 +61,7 @@ internal sealed class AzureSignalRHubClient : IDemandsHubClient, IAsyncDisposabl
         }
         catch when (contextTask.IsFaulted || contextTask.IsCanceled)
         {
+            _logger.LogWarning("notification failed");
         }
     }
 
