@@ -35,6 +35,7 @@ builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddKlesiaCors(builder.Configuration);
 builder.Services.AddKlesiaAuthentication(builder.Configuration);
+builder.Services.AddScoped<ICurrentPrincipal, CurrentPrincipal>();
 builder.Services.AddAuthorization(options =>
 {
     var delegatedUser = new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()

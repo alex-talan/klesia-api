@@ -1,4 +1,5 @@
 using System.Net;
+using Klesia.Application.Authorization;
 using Microsoft.AspNetCore.Diagnostics;
 
 namespace Klesia.WebApi.Errors;
@@ -17,6 +18,13 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
         Exception exception,
         CancellationToken cancellationToken)
     {
+        if (exception is AccessDeniedException)
+        {
+            var forbiddenTraceId = GetCorrelationId(httpContext);
+            await Problems.WriteForbiddenAsync(httpContext, forbiddenTraceId);
+            return true;
+        }
+
         var routeTemplate = httpContext.GetEndpoint() is Microsoft.AspNetCore.Routing.RouteEndpoint endpoint
             && endpoint.RoutePattern.RawText is not null
                 ? endpoint.RoutePattern.RawText

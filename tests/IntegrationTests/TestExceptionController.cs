@@ -22,6 +22,27 @@ public sealed class TestExceptionController : ControllerBase
     }
 
     [Authorize]
+    [HttpGet("allowlist-unknown")]
+    public IActionResult AllowlistUnknown()
+    {
+        throw new Klesia.Application.Authorization.AccessDeniedException();
+    }
+
+    [Authorize]
+    [HttpGet("allowlist-inactive")]
+    public IActionResult AllowlistInactive()
+    {
+        throw new Klesia.Application.Authorization.AccessDeniedException();
+    }
+
+    [Authorize]
+    [HttpGet("allowlist-failure")]
+    public IActionResult AllowlistFailure()
+    {
+        throw new InvalidOperationException("REPOSITORY_FAILURE_TEST_TEXT");
+    }
+
+    [Authorize]
     [HttpGet("authenticated")]
     public IActionResult Authenticated()
     {
