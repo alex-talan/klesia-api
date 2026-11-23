@@ -16,7 +16,7 @@ public sealed class TestTokenFactory : IDisposable
     private readonly RSA _rsa = RSA.Create(2048);
     private readonly RSA _otherRsa = RSA.Create(2048);
 
-    public string Create(TestTokenKind kind = TestTokenKind.Valid)
+    public string Create(TestTokenKind kind = TestTokenKind.Valid, string? oidOverride = null)
     {
         var now = DateTime.UtcNow;
         var claims = new List<Claim>
@@ -26,7 +26,7 @@ public sealed class TestTokenFactory : IDisposable
                 ? string.Empty
                 : kind == TestTokenKind.NonGuidOid
                     ? "not-a-guid"
-                    : Oid),
+                    : oidOverride ?? Oid),
             new("ver", "2.0")
         };
 
