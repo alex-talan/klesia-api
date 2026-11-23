@@ -10,6 +10,7 @@ public sealed class InMemoryBaeDocumentStore : IBaeDocumentStore
     private readonly ConcurrentDictionary<Uri, byte[]> _documents = new();
     private readonly Uri _blobServiceUri;
     private readonly string _containerName;
+    private int _openReadCount;
 
     public InMemoryBaeDocumentStore(
         Uri? blobServiceUri = null,
@@ -22,6 +23,18 @@ public sealed class InMemoryBaeDocumentStore : IBaeDocumentStore
     public bool IsUnavailable { get; set; }
 
     public bool ReturnNotFoundOnRead { get; set; }
+
+    public int OpenReadCount => Volatile.Read(ref _openReadCount);
+
+    public Func<byte[], Stream>? ReadStreamFactory { get; set; }
+
+    public void AddDocument(Uri blobUrl, byte[] content)
+    {
+        if (!_documents.TryAdd(blobUrl, content))
+        {
+            throw new InvalidOperationException("A document already exists at that test URL.");
+        }
+    }
 
     public async Task<Uri> UploadAsync(Guid ownerOid, Stream pdf, CancellationToken cancellationToken)
     {
@@ -43,6 +56,7 @@ public sealed class InMemoryBaeDocumentStore : IBaeDocumentStore
     public Task<BaeDocumentReadResult> OpenReadAsync(Uri blobUrl, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        Interlocked.Increment(ref _openReadCount);
         ThrowIfUnavailable();
 
         if (!IsOwnedLocation(blobUrl))
@@ -55,8 +69,9 @@ public sealed class InMemoryBaeDocumentStore : IBaeDocumentStore
             throw new DocumentNotFoundException();
         }
 
-        Stream stream = new MemoryStream(content, writable: false);
-        return Task.FromResult(new BaeDocumentReadResult(stream, content.LongLength));
+        Stream stream = ReadStreamFactory?.Invoke(content) ?? new MemoryStream(content, writable: false);
+        long? length = stream.CanSeek ? stream.Length : null;
+        return Task.FromResult(new BaeDocumentReadResult(stream, length));
     }
 
     public Task DeleteAsync(Uri blobUrl, CancellationToken cancellationToken)

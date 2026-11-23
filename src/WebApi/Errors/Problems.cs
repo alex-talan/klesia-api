@@ -27,18 +27,28 @@ public static class Problems
 
     public static async Task WriteForbiddenAsync(HttpContext context, string? traceId)
     {
-        context.Response.StatusCode = StatusCodes.Status403Forbidden;
-        await Results.Json(new
-        {
-            title = "Forbidden",
-            status = StatusCodes.Status403Forbidden,
-            traceId
-        }, contentType: "application/problem+json", statusCode: StatusCodes.Status403Forbidden)
-            .ExecuteAsync(context);
+        await WriteAsync(context, StatusCodes.Status403Forbidden, "Forbidden", traceId);
     }
+
+    public static Task WriteNotFoundAsync(HttpContext context, string? traceId) =>
+        WriteAsync(context, StatusCodes.Status404NotFound, "Not Found", traceId);
+
+    public static Task WriteServiceUnavailableAsync(HttpContext context, string? traceId) =>
+        WriteAsync(context, StatusCodes.Status503ServiceUnavailable, "Service Unavailable", traceId);
+
+    public static Task WriteInternalServerErrorAsync(HttpContext context, string? traceId) =>
+        WriteAsync(context, StatusCodes.Status500InternalServerError, "An unexpected error occurred.", traceId);
 
     public static IResult InternalServerError() =>
         Problem(StatusCodes.Status500InternalServerError, "An unexpected error occurred.");
+
+    private static async Task WriteAsync(HttpContext context, int status, string title, string? traceId)
+    {
+        context.Response.StatusCode = status;
+        await Results.Json(new { title, status, traceId },
+            contentType: "application/problem+json", statusCode: status)
+            .ExecuteAsync(context);
+    }
 
     private static IResult Problem(
         int status,
