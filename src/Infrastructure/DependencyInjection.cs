@@ -4,6 +4,7 @@ using Azure.Storage.Blobs;
 using Klesia.Application.Abstractions;
 using Klesia.Application.Notifications;
 using Klesia.Infrastructure.Documents;
+using Klesia.Infrastructure.Extraction;
 using Klesia.Infrastructure.Health;
 using Klesia.Infrastructure.Notifications;
 using Klesia.Infrastructure.Options;
@@ -42,6 +43,11 @@ public static class DependencyInjection
             serviceProvider.GetRequiredService<AzureSignalRHubClient>());
         services.AddSingleton<INotifier, AzureSignalRNotifier>();
         services.AddScoped<IRealtimeNegotiator, AzureSignalRNegotiator>();
+        services.AddSingleton<ChannelExtractionQueue>();
+        services.AddSingleton<IExtractionQueue>(serviceProvider =>
+            serviceProvider.GetRequiredService<ChannelExtractionQueue>());
+        services.AddSingleton<IExtractionQueueReader>(serviceProvider =>
+            serviceProvider.GetRequiredService<ChannelExtractionQueue>());
         services.AddSingleton<ISqlConnectionFactory, SqlConnectionFactory>();
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IDemandRepository, DemandRepository>();
