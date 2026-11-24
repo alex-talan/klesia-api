@@ -7,7 +7,10 @@ using Klesia.WebApi.Cors;
 using Klesia.WebApi.Errors;
 using Klesia.WebApi.Health;
 using Klesia.WebApi.Logging;
+using Klesia.WebApi;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.Http.Features;
+using Microsoft.Extensions.Options;
 using KlesiaCors = Klesia.WebApi.Cors.CorsServiceCollectionExtensions;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -32,6 +35,9 @@ if (string.Equals(
 }
 
 builder.Services.AddKlesiaOptions(builder.Configuration);
+builder.Services.AddOptions<FormOptions>()
+    .Configure<IOptions<UploadOptions>>((options, upload) =>
+        options.MultipartBodyLengthLimit = UploadRequestLimits.ForPdfSize(upload.Value.MaxPdfSizeBytes));
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();

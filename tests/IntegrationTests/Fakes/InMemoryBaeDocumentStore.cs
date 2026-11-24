@@ -11,6 +11,7 @@ public sealed class InMemoryBaeDocumentStore : IBaeDocumentStore
     private readonly Uri _blobServiceUri;
     private readonly string _containerName;
     private int _openReadCount;
+    private int _deleteCount;
 
     public InMemoryBaeDocumentStore(
         Uri? blobServiceUri = null,
@@ -25,6 +26,12 @@ public sealed class InMemoryBaeDocumentStore : IBaeDocumentStore
     public bool ReturnNotFoundOnRead { get; set; }
 
     public int OpenReadCount => Volatile.Read(ref _openReadCount);
+
+    public int DocumentCount => _documents.Count;
+
+    public int DeleteCount => Volatile.Read(ref _deleteCount);
+
+    public IReadOnlyCollection<Uri> UploadedBlobUrls => _documents.Keys.ToArray();
 
     public Func<byte[], Stream>? ReadStreamFactory { get; set; }
 
@@ -78,6 +85,7 @@ public sealed class InMemoryBaeDocumentStore : IBaeDocumentStore
     {
         cancellationToken.ThrowIfCancellationRequested();
         ThrowIfUnavailable();
+        Interlocked.Increment(ref _deleteCount);
 
         if (!IsOwnedLocation(blobUrl))
         {

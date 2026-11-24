@@ -233,7 +233,12 @@ public sealed class DemandDocumentEndpointTests
             NullLogger<DemandService>.Instance);
         var principal = Substitute.For<ICurrentPrincipal>();
         principal.GetOid(Arg.Any<System.Security.Claims.ClaimsPrincipal>()).Returns(OwnerOid);
-        var controller = new DemandsController(service, principal, NullLogger<DemandsController>.Instance);
+        var controller = new DemandsController(
+            service,
+            new AuthorizedUserResolver(users),
+            principal,
+            NullLogger<DemandsController>.Instance,
+            Microsoft.Extensions.Options.Options.Create(new Klesia.Infrastructure.Options.UploadOptions()));
         using var cancellation = new CancellationTokenSource();
         var httpContext = new DefaultHttpContext();
         httpContext.RequestAborted = cancellation.Token;

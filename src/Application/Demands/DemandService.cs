@@ -1,6 +1,7 @@
 using Klesia.Application.Abstractions;
 using Klesia.Application.Authorization;
 using Klesia.Application.Documents;
+using Klesia.Domain.Users;
 using Microsoft.Extensions.Logging;
 
 namespace Klesia.Application.Demands;
@@ -100,6 +101,17 @@ public sealed class DemandService
         ArgumentNullException.ThrowIfNull(input);
 
         var user = await _authorizedUserResolver.ResolveAsync(oid, cancellationToken);
+        return await CreateAsync(user, input, cancellationToken);
+    }
+
+    public async Task<CreateDemandResult> CreateAsync(
+        ApplicationUser user,
+        CreateDemandInput input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(user);
+        ArgumentNullException.ThrowIfNull(input);
+
         var validation = await _createDemandValidator.ValidateAsync(
             new CreateDemandValidationInput(
                 input.GkNumber,
