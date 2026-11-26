@@ -61,3 +61,16 @@ Dapper guidance lives in `.claude/skills/dotnet-backend-patterns` and the `dappe
 ## License
 
 See [LICENSE](LICENSE).
+
+## Publish the database project
+VS Code parameters:
+- Authentication type: Universal with MFA Support
+- Account: Talan FR - Demo account (Azure AD)
+
+```powershell
+SqlPackage `
+  /Action:Publish `
+  /SourceFile:"database/Klesia.Database/bin/Debug/Klesia.Database.dacpac" `
+  /Profile:"database/Klesia.Database/Properties/Azure.publish.xml" `
+  /TargetConnectionString:'Data Source=klesia-dev-server-db.database.windows.net;Initial Catalog=klesia-dev-db;Authentication=Active Directory Interactive;User ID=alejandro.reyes-amaro@talan.com;Pooling=False;Connect Timeout=60;Encrypt=True;TrustServerCertificate=False;Application Name=SqlPackage;Application Intent=ReadWrite;Command Timeout=30'
+```
