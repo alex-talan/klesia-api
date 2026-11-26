@@ -13,6 +13,8 @@ using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.Options;
 using KlesiaCors = Klesia.WebApi.Cors.CorsServiceCollectionExtensions;
 
+using Microsoft.OpenApi;
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
@@ -73,7 +75,62 @@ builder.Services.AddProblemDetails(options =>
     };
 });
 builder.Services.AddControllers();
-builder.Services.AddOpenApi();
+
+
+var swaggerTenantId = builder.Configuration["Swagger:TenantId"];
+var swaggerClientId = builder.Configuration["Swagger:ClientId"];
+var swaggerScope = builder.Configuration["Swagger:Scope"];
+
+builder.Services.AddOpenApi(options =>
+{
+    options.AddDocumentTransformer((document, context, cancellationToken) =>
+    {
+        if (!builder.Environment.IsDevelopment())
+        {
+            return Task.CompletedTask;
+        }
+
+        var authority =
+            $"https://login.microsoftonline.com/{swaggerTenantId}/oauth2/v2.0";
+
+        document.Components ??= new OpenApiComponents();
+
+        document.Components.SecuritySchemes ??=
+            new Dictionary<string, IOpenApiSecurityScheme>();
+
+        document.Components.SecuritySchemes["EntraId"] =
+            new OpenApiSecurityScheme
+            {
+                Type = SecuritySchemeType.OAuth2,
+                Description = "Microsoft Entra ID authentication",
+                Flows = new OpenApiOAuthFlows
+                {
+                    AuthorizationCode = new OpenApiOAuthFlow
+                    {
+                        AuthorizationUrl = new Uri($"{authority}/authorize"),
+                        TokenUrl = new Uri($"{authority}/token"),
+                        Scopes = new Dictionary<string, string>
+                        {
+                            [swaggerScope!] = "Access Klesia API"
+                        }
+                    }
+                }
+            };
+
+        document.Security ??= new List<OpenApiSecurityRequirement>();
+
+        document.Security.Add(new OpenApiSecurityRequirement
+        {
+            [new OpenApiSecuritySchemeReference("EntraId", document)] =
+                new List<string> { swaggerScope! }
+        });
+
+        return Task.CompletedTask;
+    });
+});
+
+
+
 builder.Services.AddHealthChecks().AddCheck<SqlHealthCheck>("sql");
 
 var app = builder.Build();
@@ -81,6 +138,23 @@ var app = builder.Build();
 app.UseForwardedHeaders();
 app.UseKlesiaLogging();
 app.UseExceptionHandler();
+
+// Swagger UI must be registered here
+app.UseSwaggerUI(options =>
+    {
+        options.SwaggerEndpoint(
+            "/openapi/v1.json",
+            "Klesia API v1"
+        );
+
+        options.RoutePrefix = "swagger";
+
+        options.OAuthClientId(swaggerClientId);
+        options.OAuthAppName("Klesia Swagger");
+        options.OAuthUsePkce();
+        options.OAuthScopes(swaggerScope!);
+    });
+
 app.UseRouting();
 app.UseCors(KlesiaCors.PolicyName);
 app.UseAuthentication();
@@ -120,10 +194,11 @@ app.UseStatusCodePages(async statusContext =>
 
 if (app.Environment.IsDevelopment())
 {
-    app.MapOpenApi();
+    app.MapOpenApi().AllowAnonymous();
 }
 
 app.MapControllers();
+
 app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
 {
     ResponseWriter = HealthResponseWriter.WriteAsync,
